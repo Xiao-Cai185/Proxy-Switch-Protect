@@ -1,0 +1,343 @@
+/* ==========================================================================
+   Popup 弹窗专属样式 (High-Tech & Glassmorphic)
+   ========================================================================== */
+
+.popup-body {
+  width: 380px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: var(--bg-app);
+}
+
+.popup {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 600px;
+  overflow-y: auto;
+  background:
+    radial-gradient(130% 60% at 0% 0%, var(--primary-glow) 0%, transparent 60%),
+    radial-gradient(80% 50% at 100% 100%, var(--purple-glow) 0%, transparent 70%),
+    var(--bg-app);
+}
+
+/* 头部导航与品牌展示 */
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 2px;
+}
+
+.popup-logo-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--primary) 0%, #1e40af 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px var(--primary-glow);
+  flex: none;
+}
+
+.popup-logo-icon {
+  color: #ffffff;
+}
+
+.popup-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.popup-version {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+}
+
+.popup-sub {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.popup-header-actions {
+  gap: 6px;
+}
+
+/* WebRTC 状态小胶囊 */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border-card);
+  background: var(--bg-card);
+  transition: all 0.2s ease;
+}
+
+.chip-ok {
+  background: var(--ok-surface);
+  color: var(--ok);
+  border-color: var(--ok-glow);
+}
+
+.chip-muted {
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border-color: transparent;
+}
+
+/* 落地 IP 状态面板 (ExitIpPanel 专属样式) */
+.exit-panel-card {
+  padding: 12px;
+  border: 1px solid var(--border-card);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exit-panel-mismatch {
+  border-color: var(--warn);
+  box-shadow: 0 0 14px var(--warn-glow);
+}
+
+.exit-panel-header {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.btn-recheck {
+  font-size: 11px;
+  padding: 2px 6px;
+  gap: 4px;
+}
+
+.spin-icon {
+  animation: ppSpin 0.8s linear infinite;
+}
+
+.exit-ip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exit-ip-head {
+  gap: 10px;
+}
+
+.exit-flag-wrapper {
+  padding: 2px;
+  border-radius: 5px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-main {
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.stack-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+
+.stack-grid-mismatch {
+  background: var(--warn-surface);
+  border-color: var(--warn);
+}
+
+.stack-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  min-width: 0;
+}
+
+.stack-label {
+  flex: none;
+  width: 32px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+}
+
+.stack-row-primary .stack-label {
+  color: var(--primary);
+}
+
+.stack-ip {
+  font-size: 11px;
+}
+
+.btn-copy-ip {
+  padding: 2px;
+  opacity: 0.7;
+}
+.btn-copy-ip:hover {
+  opacity: 1;
+}
+
+.stack-mismatch-banner {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  gap: 6px;
+}
+
+.exit-meta {
+  font-size: 11px;
+  padding-top: 2px;
+}
+
+.exit-loading-state,
+.exit-error-state {
+  padding: 6px 0;
+}
+
+/* 列表卡片 (List Cards & Rows) */
+.popup-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.section-title-row {
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.list-card {
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-main);
+  width: 100%;
+  transition: all 0.15s ease;
+}
+
+.profile-row {
+  cursor: pointer;
+  text-align: left;
+  position: relative;
+}
+
+.profile-row:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-subtle);
+}
+
+.profile-active {
+  background: var(--primary-surface);
+  border-color: var(--primary-glow);
+}
+
+.profile-active:hover {
+  background: var(--primary-surface);
+}
+
+.profile-color-pip {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.15);
+}
+
+.profile-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.profile-active-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-shadow: 0 2px 6px var(--primary-glow);
+}
+
+/* 守护站点行 */
+.site-row {
+  padding: 7px 10px;
+}
+.site-row:hover {
+  background: var(--bg-card-hover);
+}
+
+.site-domain {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+}
+
+.site-flags {
+  gap: 3px;
+}
+
+.empty-inline {
+  padding: 14px 8px;
+  text-align: center;
+}
+
+/* 习惯建议卡片 */
+.suggestion-banner {
+  flex-wrap: wrap;
+  border: 1px solid var(--primary-glow);
+}

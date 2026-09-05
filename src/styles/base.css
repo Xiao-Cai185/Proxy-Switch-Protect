@@ -1,0 +1,656 @@
+/* ==========================================================================
+   Proxy-Protect 现代化设计系统 (Design System & Base Tokens)
+   ========================================================================== */
+
+:root {
+  /* 基础色彩体系 (Light Mode) */
+  --bg-app: #f6f8fb;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8fafc;
+  --bg-surface: #edf2f7;
+  --bg-input: #ffffff;
+  
+  --text-main: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-inverse: #ffffff;
+
+  --border-subtle: rgba(226, 232, 240, 0.8);
+  --border-card: #e2e8f0;
+  --border-focus: #3b82f6;
+
+  /* 功能语义色彩 (极光蓝、祖母绿、琥珀金、玫瑰红、迷魅紫) */
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-glow: rgba(37, 99, 235, 0.15);
+  --primary-surface: #eff6ff;
+
+  --ok: #059669;
+  --ok-glow: rgba(16, 185, 129, 0.15);
+  --ok-surface: #ecfdf5;
+
+  --warn: #d97706;
+  --warn-glow: rgba(245, 158, 11, 0.15);
+  --warn-surface: #fffbeb;
+
+  --danger: #dc2626;
+  --danger-glow: rgba(239, 68, 68, 0.15);
+  --danger-surface: #fef2f2;
+
+  --purple: #7c3aed;
+  --purple-glow: rgba(124, 58, 237, 0.15);
+  --purple-surface: #f5f3ff;
+
+  /* 几何与阴影 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-full: 9999px;
+
+  --shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 2px 6px -1px rgba(15, 23, 42, 0.06), 0 1px 4px -1px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 6px 16px -2px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
+  --shadow-glow: 0 0 18px rgba(37, 99, 235, 0.18);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Segoe UI Variable", "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* 基础色彩体系 (Dark Mode - 科技曜黑与深海星云) */
+    --bg-app: #080c14;
+    --bg-card: rgba(16, 24, 40, 0.85);
+    --bg-card-hover: rgba(23, 34, 56, 0.95);
+    --bg-surface: #131c2e;
+    --bg-input: rgba(11, 17, 30, 0.8);
+
+    --text-main: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --text-inverse: #0f172a;
+
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-card: rgba(255, 255, 255, 0.1);
+    --border-focus: #60a5fa;
+
+    --primary: #3b82f6;
+    --primary-hover: #60a5fa;
+    --primary-glow: rgba(59, 130, 246, 0.25);
+    --primary-surface: rgba(59, 130, 246, 0.12);
+
+    --ok: #10b981;
+    --ok-glow: rgba(16, 185, 129, 0.25);
+    --ok-surface: rgba(16, 185, 129, 0.12);
+
+    --warn: #f59e0b;
+    --warn-glow: rgba(245, 158, 11, 0.25);
+    --warn-surface: rgba(245, 158, 11, 0.12);
+
+    --danger: #ef4444;
+    --danger-glow: rgba(239, 68, 68, 0.25);
+    --danger-surface: rgba(239, 68, 68, 0.12);
+
+    --purple: #8b5cf6;
+    --purple-glow: rgba(139, 92, 246, 0.25);
+    --purple-surface: rgba(139, 92, 246, 0.12);
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 8px 24px -2px rgba(0, 0, 0, 0.5), 0 0 1px 1px rgba(255, 255, 255, 0.05);
+    --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.25);
+  }
+}
+
+/* ==========================================================================
+   全局重置与排版
+   ========================================================================== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  color: var(--text-main);
+  letter-spacing: -0.015em;
+}
+
+/* ==========================================================================
+   现代化卡片系统 (Glassmorphism & Surface Cards)
+   ========================================================================== */
+
+.card {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 14px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+
+.card:hover {
+  border-color: var(--border-subtle);
+}
+
+.card-interactive {
+  cursor: pointer;
+}
+.card-interactive:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary);
+}
+
+/* ==========================================================================
+   按钮组件 (Buttons)
+   ========================================================================== */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-card);
+  background: var(--bg-card);
+  color: var(--text-main);
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--border-subtle);
+  transform: translateY(-0.5px);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 2px 8px var(--primary-glow);
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--primary-hover) 0%, var(--primary-hover) 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 14px var(--primary-glow);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, var(--danger) 0%, #b91c1c 100%);
+  border-color: transparent;
+  color: #ffffff;
+  box-shadow: 0 2px 8px var(--danger-glow);
+}
+.btn-danger:hover {
+  color: #ffffff;
+  box-shadow: 0 4px 14px var(--danger-glow);
+}
+
+.btn-ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover {
+  background: var(--bg-surface);
+  color: var(--text-main);
+}
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  gap: 4px;
+}
+
+.btn-icon {
+  padding: 6px;
+  border-radius: var(--radius-md);
+  aspect-ratio: 1;
+}
+
+/* ==========================================================================
+   现代化表单控制 (Inputs & Forms)
+   ========================================================================== */
+
+input[type='text'],
+input[type='number'],
+input[type='password'],
+input[type='search'],
+select,
+textarea {
+  width: 100%;
+  border: 1px solid var(--border-card);
+  background: var(--bg-input);
+  color: var(--text-main);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  font-size: 13px;
+  transition: all 0.15s ease;
+  box-shadow: var(--shadow-xs);
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+}
+
+label {
+  display: block;
+}
+
+.field {
+  margin-bottom: 12px;
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--text-secondary);
+  margin-bottom: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.field-error {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ==========================================================================
+   iOS 风格 Switch 开关
+   ========================================================================== */
+
+.pp-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  gap: 8px;
+}
+
+.pp-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.pp-switch-track {
+  width: 36px;
+  height: 20px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-card);
+  border-radius: 9999px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  flex: none;
+}
+
+.pp-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background-color: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pp-switch input:checked + .pp-switch-track {
+  background-color: var(--primary);
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px var(--primary-glow);
+}
+
+.pp-switch input:checked + .pp-switch-track .pp-switch-thumb {
+  transform: translateX(16px);
+}
+
+.pp-switch input:disabled + .pp-switch-track {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ==========================================================================
+   标签、微标与状态点 (Tags, Badges & Dots)
+   ========================================================================== */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 550;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.tag-primary {
+  background: var(--primary-surface);
+  color: var(--primary);
+  border-color: transparent;
+}
+
+.tag-ok {
+  background: var(--ok-surface);
+  color: var(--ok);
+  border-color: transparent;
+}
+
+.tag-warn {
+  background: var(--warn-surface);
+  color: var(--warn);
+  border-color: transparent;
+}
+
+.tag-danger {
+  background: var(--danger-surface);
+  color: var(--danger);
+  border-color: transparent;
+}
+
+.tag-purple {
+  background: var(--purple-surface);
+  color: var(--purple);
+  border-color: transparent;
+}
+
+/* 状态圆点 (含呼吸动效) */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  position: relative;
+}
+
+.dot-ok {
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok-glow);
+}
+
+.dot-danger {
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger-glow);
+}
+
+.dot-warn {
+  background: var(--warn);
+  box-shadow: 0 0 6px var(--warn-glow);
+}
+
+.dot-bypass {
+  background: var(--purple);
+  box-shadow: 0 0 6px var(--purple-glow);
+}
+
+.dot-muted {
+  background: var(--text-muted);
+  opacity: 0.4;
+}
+
+.dot-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  opacity: 0.6;
+  animation: dotPulseAnim 1.6s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+@keyframes dotPulseAnim {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+/* ==========================================================================
+   矢量国旗组件 (Flags)
+   ========================================================================== */
+
+.flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1;
+}
+
+.flag-img {
+  display: block;
+  border-radius: 3px;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+  flex: none;
+}
+
+.flag-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--bg-surface);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.flag-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+/* ==========================================================================
+   提示横幅 (Banners & Callouts)
+   ========================================================================== */
+
+.banner {
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid transparent;
+}
+
+.banner-info {
+  background: var(--primary-surface);
+  color: var(--text-main);
+  border-color: var(--primary-glow);
+}
+.banner-info svg {
+  color: var(--primary);
+  flex: none;
+  margin-top: 1px;
+}
+
+.banner-warn {
+  background: var(--warn-surface);
+  color: var(--text-main);
+  border-color: var(--warn-glow);
+}
+.banner-warn svg {
+  color: var(--warn);
+  flex: none;
+  margin-top: 1px;
+}
+
+.banner-danger {
+  background: var(--danger-surface);
+  color: var(--text-main);
+  border-color: var(--danger-glow);
+}
+.banner-danger svg {
+  color: var(--danger);
+  flex: none;
+  margin-top: 1px;
+}
+
+/* ==========================================================================
+   微旋转加载动画 (Spinners)
+   ========================================================================== */
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border-card);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: ppSpin 0.75s linear infinite;
+  display: inline-block;
+  flex: none;
+}
+
+@keyframes ppSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   布局辅助类 (Flex Utilities)
+   ========================================================================== */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.small {
+  font-size: 12px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 24px 12px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.empty-icon {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+/* 优雅精致的滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-card);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
