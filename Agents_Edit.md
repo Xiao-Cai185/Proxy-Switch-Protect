@@ -511,6 +511,69 @@ Popup 弹窗右上角已具备直观的齿轮设置图标按钮（`<SettingsIcon
 - **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项核心测试 **100% 通过**。
 - **生产构建打包 (Vite)**：执行 `npm run build`，成功耗时 596ms 编译生成 `dist/`，全部资源顺利更新。
 
+---
+
+### [2026-09-20] 流量处理逻辑深度重构与三等级调节策略（严格拦截 / 抽样检测 / 宽松效率）全面演进与版本跃升至 v3.1.8
+
+#### 1. 需求背景与根因分析
+- **问题现象**：
+  在绑定了域名+规则的网页内进行日常访问与交互时，插件对每一条 HTTP 请求均做判定校验，导致代理连接效率极度下降，页面出现明显的加载停顿、接口阻塞甚至断流。
+- **深度根因排查**：
+  1. **监听链路过频触发**：`src/background/index.ts` 中通过 `webNavigation.onBeforeNavigate`、`tabs.onActivated` 与 `tabs.onUpdated`（`status === 'loading'`）监听了主框架导航、标签页切回与页面加载更新，只要命中域名即无差别调用 `guard.onProtectedAccess`。
+  2. **DNR 动态规则无差别全量阻断（核心根因）**：一旦调用 `onProtectedAccess`，目标域名立刻被置入 `checking` 状态，并通过 Chromium 的 `declarativeNetRequest` 动态下发规则：**直接对网页内所有的子资源请求（包括 Fetch/XHR、JS、CSS、图片、字体、WebSocket 等全部 `SUB_RESOURCE_TYPES`）下发 `block` 阻断规则**！
+  3. **外部网络探测延迟与页面渲染卡顿**：锁屏后必须等待外部多源测速探针（耗时 500ms~2500ms），在此期间页面 HTML 正在解析加载的全部后续请求被 DNR 判定丢弃或挂起；即使 1.5 秒防抖过后，只要用户点击链接、单页应用路由切换（SPA pushState）或标签页切回，又会重新进入 `checking` 加锁阻断，导致用户感知为“对每一条 HTTP 请求都在做校验”，代理速度极度迟缓。
+
+#### 2. 技术方案与架构演进
+针对上述痛点，系统性引入三等级流量判定校验策略（`TrafficValidationLevel`），兼顾极端安全性与极致连接效率：
+
+1. **三等级调节策略模型设计**：
+   - **最高等级（严格拦截 · 实时强校验 - `strict`）**：
+     - **与原版本机制完全一致**。开屏首检、切回标签页、页面加载更新每次均强制触发实时锁屏与外部 IP 探测（Fail-Closed）。
+     - 未放行前通过 DeclarativeNetRequest 同步阻断网页全部子资源，必须拿到最新通过结果才放行，适合对异地风控极度敏感的金融资产与核心控制台。
+   - **第二等级（抽样检测 · 平衡模式 - `sampling`）**：
+     - **开屏请求必检，后续交互轻量抽样二次复核**。开屏首次请求通过后放行后续交互流量，绝不盲目对整站下发子资源阻断。
+     - 对后续页面内请求通过只读非阻塞的 `webRequest.onBeforeRequest` 进行请求计数（每 15 次交互）与时间窗口（60 秒）轻量抽样。
+     - 抽检在后台异步比对当前缓存，平滑无感；仅在抽检确认 IP 漂移或发生违规时才触发锁定与阻断，兼顾安全与流畅。
+   - **第三等级（宽松效率 · 极速流畅 - `relaxed` - 默认推荐）**：
+     - **只对标签页开屏请求进行校验，校验通过默认信任后续交互**。仅在标签页首次打开/主框架开屏请求时校验落地 IP。
+     - 校验通过后，记录当前标签页该域名的放行许可（`TabSession`）。后续该标签页内的所有交互流量（Fetch/XHR、子资源加载、单页应用 SPA 路由切换、切回激活等）全部默认放行，绝不重复触发锁屏和外部探测。
+     - 代理连接 100% 满血极速直通，彻底解决卡顿与断流。
+
+2. **核心模块演进细节**：
+   - **数据模型扩展 (`src/shared/types.ts` & `src/shared/constants.ts`)**：
+     - 声明 `TrafficValidationLevel = 'strict' | 'sampling' | 'relaxed'`。
+     - 在 `Settings` 接口新增 `trafficValidationLevel`，并在 `DEFAULT_SETTINGS` 中默认启用 `'relaxed'` 宽松效率模式。
+     - 在 `ProtectedSite` 规则中扩展可选字段 `validationLevel?: TrafficValidationLevel | 'default'`，支持单个站点独立指定或继承全局。
+     - 在 `SK`（session 存储键）中新增 `tabSessions` 标识。
+   - **流量会话与策略调度器 (`src/background/traffic-policy.ts`)**：
+     - 实现 `TabSession` 机制，管理各标签页的开屏验证状态、域名、放行时间戳、请求计数器与上次抽检时间。
+     - 提供 `resolveEffectiveLevel`（解析站点级与全局级生效策略）、`isTabSessionVerified`、`markTabVerified`、`removeTabSession` 与 `clearAllTabSessions`。
+     - 提供 `recordTabRequest`（针对 sampling 模式的阈值触发器）与 `isCheckStateMatching`。
+     - 自动侦听 `chrome.tabs.onRemoved` 销毁关闭标签页的会话；并在切换代理节点、规则修改、用户强行锁定（`relockAll`）时一键重置全部会话，确保安全性无死角。
+   - **守护引擎与后台路由重构 (`src/background/guard-engine.ts` & `src/background/index.ts`)**：
+     - `onProtectedAccess(url, tabId)`：支持传递 `tabId`。在 `relaxed` 与 `sampling` 模式下，若当前标签页已通过开屏验证，直接放行；若为开屏请求且当前已有新鲜合规的检测缓存，直接放行当前标签页，免去重复加锁与外部测速。
+     - 新增 `triggerSamplingCheck(siteId)`：针对抽样检测模式执行后台平滑二次校验。
+     - 在 `index.ts` 中注册 `initTrafficPolicy()`，并通过 `webRequest.onBeforeRequest` 实现非阻塞的后续交互抽样触发器；显式返回 `undefined` 严格契合 `@types/chrome` 的 `BlockingResponse | undefined` 联合签名，杜绝 IDE 静态检查误报。
+   - **控制中心 Settings 选项卡 UI 改造 (`SettingsTab.tsx`)**：
+     - 在 WebRTC 防护下方新增「流量判定校验与放行策略等级」专属交互卡片，提供三档策略的单选卡片、高亮微光、场景标签与机制详述。
+   - **守护规则 Sites 选项卡 UI 改造 (`SitesTab.tsx`)**：
+     - 规则列表中为每个站点动态展示策略标签（严格拦截 / 抽样检测 / 宽松效率 / 跟随全局）。
+     - 在新建与编辑规则表单 `SiteForm` 中添加策略等级单选组，支持针对特定敏感站点单独设定等级。
+   - **Popup 快捷弹窗适配与一键加护联动 (`popup/App.tsx`)**：
+     - 在当前站点已加护卡片中反显当前站点的策略胶囊。
+     - 在一键加护卡片展开备忘表单中提供策略等级快速选择切换。
+
+3. **版本自增迭代**：
+   - 遵循 Semantic Versioning 规范，版本号由 `v3.1.7` 自增至 `v3.1.8`。
+   - `public/manifest.json`：`"version": "3.1.8"`
+   - `package.json`：`"version": "3.1.8"`
+
+#### 3. 验证与回归测试记录
+- **静态类型检查 (TypeScript)**：执行 `npm run typecheck`，全项目 **0 错误、0 警告**。
+- **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项核心测试 **100% 通过**。
+- **生产构建打包 (Vite)**：执行 `npm run build`，耗时 817ms 顺利编译输出 `dist/`，全部前端页面与 Service Worker 均无异常。
+
+
 
 
 

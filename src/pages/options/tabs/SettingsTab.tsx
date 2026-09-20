@@ -11,6 +11,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  Zap,
 } from 'lucide-react';
 import { SCHEMA_VERSION } from '../../../shared/constants';
 import { sendCmd, type TestCheckerResult } from '../../../shared/messages';
@@ -150,6 +151,96 @@ export function SettingsTab() {
             onChange={(v) => patch({ webrtcProtect: v })}
           />
         </div>
+      </div>
+
+      {/* 流量判定校验与放行策略等级 */}
+      <div className="tab-header-row">
+        <div>
+          <h2 className="tab-title">
+            <Zap size={17} style={{ color: 'var(--warn)' }} />
+            <span>流量判定校验与放行策略等级</span>
+          </h2>
+          <div className="muted small" style={{ marginTop: '2px' }}>
+            调节在受守护域名内的流量检验机制与放行频率，避免网页子资源因过度校验导致代理卡顿
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
+        {[
+          {
+            id: 'relaxed' as const,
+            title: '第三等级：宽松效率模式 (推荐)',
+            badge: '极速流畅 · 开屏首检',
+            badgeClass: 'tag-ok',
+            desc: '只对标签页开屏请求（首次主框架导航）进行落地 IP 校验。校验通过后，后续页面内所有交互流量（Fetch/XHR、子资源、单页应用 SPA 路由切换）默认放行。代理连接 100% 极速直通，彻底解决连接迟缓。',
+            scene: '适用场景：OpenAI ChatGPT、Claude、密集型 WebApp 及日常大部分网站。',
+          },
+          {
+            id: 'sampling' as const,
+            title: '第二等级：抽样检测模式',
+            badge: '平衡模式 · 轻量抽检',
+            badgeClass: 'tag-primary',
+            desc: '开屏请求强制校验，通过后放行后续交互流量；对后续请求按频次轻量抽样二次复核。抽检在后台异步比对当前缓存，不提前加锁阻断子资源，仅确认 IP 漂移时才中断访问。',
+            scene: '适用场景：兼顾安全与流畅度，适合 Twitter/X、Facebook、海外云平台等常规账号。',
+          },
+          {
+            id: 'strict' as const,
+            title: '最高等级：严格拦截模式',
+            badge: '最高安全 · 实时强校验',
+            badgeClass: 'tag-warning',
+            desc: '与原版本机制完全一致。每次开屏、切换标签页、页面加载更新均强制触发实时锁屏与外部 IP 探测。未放行前通过 DeclarativeNetRequest 同步阻断网页全部子资源。',
+            scene: '适用场景：对异地 IP 变动极度敏感的高危金融、资产与敏感风控平台。',
+          },
+        ].map((item) => {
+          const active = (settings.trafficValidationLevel || 'relaxed') === item.id;
+          return (
+            <div
+              key={item.id}
+              className={`card ${active ? 'policy-card-active' : ''}`}
+              onClick={() => patch({ trafficValidationLevel: item.id })}
+              style={{
+                cursor: 'pointer',
+                padding: '14px 16px',
+                border: active ? '1.5px solid var(--primary)' : '1px solid var(--border-card)',
+                background: active
+                  ? 'radial-gradient(100% 120% at 0% 0%, var(--primary-glow) 0%, var(--bg-card) 70%)'
+                  : 'var(--bg-card)',
+                boxShadow: active ? '0 0 14px var(--primary-glow)' : 'var(--shadow-xs)',
+                transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+              }}
+            >
+              <div className="row-between" style={{ alignItems: 'flex-start' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row" style={{ gap: '8px', alignItems: 'center' }}>
+                    <div
+                      style={{
+                        width: '16px',
+                        height: '16px',
+                        borderRadius: '50%',
+                        border: active ? '5px solid var(--primary)' : '2px solid var(--border-subtle)',
+                        background: active ? '#ffffff' : 'transparent',
+                        flex: 'none',
+                        transition: 'all 0.2s',
+                      }}
+                    />
+                    <b style={{ fontSize: '14.5px', color: active ? 'var(--primary)' : 'var(--text-main)' }}>
+                      {item.title}
+                    </b>
+                    <span className={`tag ${item.badgeClass}`} style={{ fontSize: '11px' }}>
+                      {item.badge}
+                    </span>
+                  </div>
+                  <div className="small" style={{ marginTop: '6px', lineHeight: 1.5, color: 'var(--text-secondary)' }}>
+                    {item.desc}
+                  </div>
+                  <div className="small muted" style={{ marginTop: '4px', fontSize: '12px' }}>
+                    {item.scene}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {/* 落地 IP 检测源 */}

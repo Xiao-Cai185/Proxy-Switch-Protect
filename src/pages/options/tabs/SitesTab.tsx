@@ -9,15 +9,16 @@ import {
 } from 'lucide-react';
 import { normalizeDomain, parseCidr } from '../../../shared/matchers';
 import { loadSites, saveSites } from '../../../shared/storage';
-import type { ProtectedSite } from '../../../shared/types';
+import type { ProtectedSite, TrafficValidationLevel } from '../../../shared/types';
 import { Empty, Flag, StatusDot, Switch } from '../../ui/components';
-import { useGuardStates, useSites } from '../../ui/hooks';
+import { useGuardStates, useSettings, useSites } from '../../ui/hooks';
 import { inputValue } from '../../ui/util';
 import { CountrySelect } from '../components/CountrySelect';
 
 export function SitesTab() {
   const sites = useSites() ?? [];
   const guardStates = useGuardStates() ?? {};
+  const settings = useSettings();
   const [editing, setEditing] = useState<ProtectedSite | 'new' | null>(null);
 
   const save = async (site: ProtectedSite) => {
@@ -107,6 +108,33 @@ export function SitesTab() {
                       {site.matchMode === 'all' ? '全部满足' : '任一满足'}
                     </span>
                   )}
+                  {site.validationLevel && site.validationLevel !== 'default' ? (
+                    <span
+                      className={`tag ${
+                        site.validationLevel === 'strict'
+                          ? 'tag-warning'
+                          : site.validationLevel === 'sampling'
+                          ? 'tag-primary'
+                          : 'tag-ok'
+                      }`}
+                      style={{ fontSize: '10px' }}
+                    >
+                      {site.validationLevel === 'strict'
+                        ? '严格拦截'
+                        : site.validationLevel === 'sampling'
+                        ? '抽样检测'
+                        : '宽松效率'}
+                    </span>
+                  ) : (
+                    <span className="tag tag-muted" style={{ fontSize: '10px' }}>
+                      跟随全局:{' '}
+                      {settings?.trafficValidationLevel === 'strict'
+                        ? '严格'
+                        : settings?.trafficValidationLevel === 'sampling'
+                        ? '抽样'
+                        : '宽松'}
+                    </span>
+                  )}
                 </div>
                 {site.enabled && guardState?.reason && (
                   <div className="muted small" style={{ marginTop: '2px' }}>
@@ -165,6 +193,9 @@ function SiteForm({
   const [countries, setCountries] = useState<string[]>(initial?.expectedCountries ?? []);
   const [ranges, setRanges] = useState((initial?.expectedIpRanges ?? []).join('\n'));
   const [matchMode, setMatchMode] = useState<'any' | 'all'>(initial?.matchMode ?? 'any');
+  const [validationLevel, setValidationLevel] = useState<TrafficValidationLevel | 'default'>(
+    initial?.validationLevel ?? 'default',
+  );
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [email, setEmail] = useState(initial?.note?.email ?? '');
   const [alias, setAlias] = useState(initial?.note?.alias ?? '');
@@ -194,6 +225,7 @@ function SiteForm({
       expectedCountries: countries,
       expectedIpRanges: rangeList,
       matchMode,
+      validationLevel: validationLevel === 'default' ? undefined : validationLevel,
       enabled,
       note: hasNote
         ? {
@@ -275,6 +307,37 @@ function SiteForm({
               label={enabled ? '保存后立即启用此守护规则' : '先保存，暂不启用'}
             />
           </div>
+        </div>
+
+        <div className="field full">
+          <span className="field-label">流量判定校验策略等级</span>
+          <div className="row" style={{ gap: '14px', flexWrap: 'wrap', marginTop: '6px' }}>
+            {[
+              { id: 'default' as const, label: '跟随全局设置' },
+              { id: 'relaxed' as const, label: '第三等级：宽松效率模式' },
+              { id: 'sampling' as const, label: '第二等级：抽样检测模式' },
+              { id: 'strict' as const, label: '最高等级：严格拦截模式' },
+            ].map((lvl) => (
+              <label key={lvl.id} className="row small" style={{ cursor: 'pointer', gap: '5px' }}>
+                <input
+                  type="radio"
+                  name="siteValidationLevel"
+                  checked={validationLevel === lvl.id}
+                  onChange={() => setValidationLevel(lvl.id)}
+                />
+                <span>{lvl.label}</span>
+              </label>
+            ))}
+          </div>
+          <span className="field-hint">
+            {validationLevel === 'default'
+              ? '默认继承系统设置中的全局策略。'
+              : validationLevel === 'relaxed'
+              ? '开屏首检，校验通过后默认信任放行页面内所有后续交互流量，极速直通。'
+              : validationLevel === 'sampling'
+              ? '开屏必检，后续页面内请求按频次轻量抽样复检，平滑无感。'
+              : '最高安全等级，开屏、切页、更新每次均实时强校验，子资源未放行前拦截。'}
+          </span>
         </div>
 
         <div className="field full" style={{ borderTop: '1px dashed var(--border-card)', paddingTop: '10px' }}>

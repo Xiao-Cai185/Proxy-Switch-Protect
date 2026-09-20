@@ -12,9 +12,11 @@ import {
   getLocal,
   loadActiveProfileId,
   loadSettings,
+  loadSites,
   saveSettings,
   setLocal,
 } from '../shared/storage';
+import { urlMatchesDomain } from '../shared/matchers';
 import type { ProxyProfile } from '../shared/types';
 import * as guard from './guard-engine';
 import { acceptSuggestion, dismissSuggestion, initHabitLearner } from './habit-learner';
@@ -26,12 +28,28 @@ import {
   isBuiltinProfile,
   reapplyActiveProfile,
 } from './proxy-manager';
+import {
+  initTrafficPolicy,
+  recordTabRequest,
+  resolveEffectiveLevel,
+} from './traffic-policy';
 import { applyWebRtcPolicy } from './webrtc-policy';
 
 /* ---------- 事件注册（必须在 SW 顶层同步完成） ---------- */
 
 initAuthListener();
 initHabitLearner();
+initTrafficPolicy();
+
+/** 后续交互流量只读监听：仅针对抽样检测模式（Level 2）触发平滑二次复核 */
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    if (details.tabId <= 0) return undefined;
+    void handleSubsequentRequest(details.tabId, details.url).catch(() => undefined);
+    return undefined;
+  },
+  { urls: ['<all_urls>'] },
+);
 
 chrome.runtime.onInstalled.addListener(() => {
   void (async () => {
@@ -86,26 +104,40 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 /**
- * 访问名单内网址：主框架导航前立刻锁 + 强制查 IP（不复用旧结果）。
+ * 访问名单内网址：主框架导航（开屏首检或主框架切页）
  */
 chrome.webNavigation.onBeforeNavigate.addListener((details) => {
   if (details.frameId !== 0) return;
-  void guard.onProtectedAccess(details.url).catch(() => undefined);
+  void guard.onProtectedAccess(details.url, details.tabId).catch(() => undefined);
 });
 
-/** 切回 / 重新打开命中规则的标签页：同样先锁再强制重验 */
+/** 切回 / 重新打开命中规则的标签页 */
 chrome.tabs.onActivated.addListener((info) => {
   void (async () => {
     const tab = await chrome.tabs.get(info.tabId);
-    if (tab.url) await guard.onProtectedAccess(tab.url);
+    if (tab.url) await guard.onProtectedAccess(tab.url, info.tabId);
   })().catch(() => undefined);
 });
 
-/** 休眠标签被唤醒加载时再验一次 */
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+/** 休眠标签被唤醒加载或页面状态更新 */
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status !== 'loading' || !tab.url) return;
-  void guard.onProtectedAccess(tab.url).catch(() => undefined);
+  void guard.onProtectedAccess(tab.url, tabId).catch(() => undefined);
 });
+
+async function handleSubsequentRequest(tabId: number, url: string): Promise<void> {
+  const [sites, settings] = await Promise.all([loadSites(), loadSettings()]);
+  const hit = sites.find((s) => s.enabled && urlMatchesDomain(url, s.domainPattern));
+  if (!hit) return;
+
+  const level = resolveEffectiveLevel(hit, settings);
+  if (level === 'sampling') {
+    const shouldSample = await recordTabRequest(tabId, hit.id);
+    if (shouldSample) {
+      void guard.triggerSamplingCheck(hit.id).catch(() => undefined);
+    }
+  }
+}
 
 void init();
 

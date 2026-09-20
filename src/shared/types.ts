@@ -59,6 +59,8 @@ export interface ProtectedSite {
   matchMode: 'any' | 'all';
   enabled: boolean;
   note?: SiteNote;
+  /** 站点级流量校验策略（可选，未设置或为 'default' 时跟随全局设置） */
+  validationLevel?: TrafficValidationLevel | 'default';
   createdAt: number;
   updatedAt: number;
 }
@@ -78,6 +80,14 @@ export interface CheckerConfig {
   builtin?: boolean;
 }
 
+/**
+ * 流量判定校验策略等级：
+ * - 'strict': 最高等级（严格模式），与原版本一致，开屏、切页、更新每次均先锁后检（Fail-Closed），子资源未就绪前拦截
+ * - 'sampling': 第二等级（抽样检测），开屏首检必查，后续页面内交互按频率抽样二次复核，抽检时优先比对有效缓存
+ * - 'relaxed': 第三等级（宽松效率模式），只对标签页开屏请求进行校验，校验通过后默认信任并放行后续页面内所有交互流量
+ */
+export type TrafficValidationLevel = 'strict' | 'sampling' | 'relaxed';
+
 /** 全局设置 */
 export interface Settings {
   checkers: CheckerConfig[];
@@ -90,6 +100,8 @@ export interface Settings {
    * 降低 STUN/ICE 真实源 IP 泄漏风险（不是 UDP 代理）。
    */
   webrtcProtect: boolean;
+  /** 全局流量判定校验策略等级 */
+  trafficValidationLevel?: TrafficValidationLevel;
   /** 是否启用使用习惯统计 */
   habitEnabled: boolean;
   /** 是否弹出绑定建议通知 */

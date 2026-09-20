@@ -25,6 +25,7 @@ import type {
   ProfileCheckResult,
   ProtectedSite,
   ProxyProfile,
+  TrafficValidationLevel,
 } from '../../shared/types';
 import { Flag, GUARD_STATUS_META, ProfileBadge, StatusDot } from '../ui/components';
 import { ExitIpPanel } from '../ui/ExitIpPanel';
@@ -520,6 +521,7 @@ function CurrentSiteGuardCard(props: {
 }) {
   const { currentTab, sites, guardStates, checkState, activeId, profiles } = props;
   const [strictMode, setStrictMode] = useState<'country' | 'subnet' | 'ip'>('country');
+  const [policyLevel, setPolicyLevel] = useState<TrafficValidationLevel | 'default'>('default');
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [noteEmail, setNoteEmail] = useState('');
   const [noteAlias, setNoteAlias] = useState('');
@@ -567,6 +569,7 @@ function CurrentSiteGuardCard(props: {
         expectedCountries: [cc],
         expectedIpRanges: ipRanges,
         matchMode: 'all',
+        validationLevel: policyLevel === 'default' ? undefined : policyLevel,
         enabled: true,
         note: {
           email: noteEmail.trim() || undefined,
@@ -597,22 +600,33 @@ function CurrentSiteGuardCard(props: {
               当前网站已受安全守护
             </span>
           </div>
-          <span
-            className={`tag ${
-              st?.status === 'allowed'
-                ? 'tag-ok'
+          <div className="row" style={{ gap: '6px' }}>
+            <span
+              className={`tag ${
+                st?.status === 'allowed'
+                  ? 'tag-ok'
+                  : st?.status === 'bypass'
+                  ? 'tag-warn'
+                  : 'tag-danger'
+              }`}
+              style={{ fontSize: '10.5px' }}
+            >
+              {st?.status === 'allowed'
+                ? '安全放行中'
                 : st?.status === 'bypass'
-                ? 'tag-warn'
-                : 'tag-danger'
-            }`}
-            style={{ fontSize: '10.5px' }}
-          >
-            {st?.status === 'allowed'
-              ? '安全放行中'
-              : st?.status === 'bypass'
-              ? '临时放行'
-              : '拦截保护中'}
-          </span>
+                ? '临时放行'
+                : '拦截保护中'}
+            </span>
+            <span className="tag tag-muted" style={{ fontSize: '10px' }}>
+              {matchingSite.validationLevel === 'strict'
+                ? '严格'
+                : matchingSite.validationLevel === 'sampling'
+                ? '抽样'
+                : matchingSite.validationLevel === 'relaxed'
+                ? '宽松'
+                : '全局策略'}
+            </span>
+          </div>
         </div>
 
         <div
@@ -860,6 +874,34 @@ function CurrentSiteGuardCard(props: {
               value={noteText}
               onChange={(e) => setNoteText(e.target.value)}
             />
+            <div className="row-between" style={{ marginTop: '4px', fontSize: '11px' }}>
+              <span className="muted">流量策略：</span>
+              <div className="row" style={{ gap: '4px' }}>
+                {[
+                  { id: 'default' as const, label: '全局' },
+                  { id: 'relaxed' as const, label: '宽松' },
+                  { id: 'sampling' as const, label: '抽样' },
+                  { id: 'strict' as const, label: '严格' },
+                ].map((lvl) => (
+                  <button
+                    key={lvl.id}
+                    type="button"
+                    className={`btn btn-xs ${policyLevel === lvl.id ? 'btn-primary' : ''}`}
+                    style={{
+                      padding: '2px 6px',
+                      fontSize: '10.5px',
+                      borderRadius: '4px',
+                      background: policyLevel === lvl.id ? 'var(--primary)' : 'rgba(255, 255, 255, 0.06)',
+                      color: policyLevel === lvl.id ? '#ffffff' : 'var(--text-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                    }}
+                    onClick={() => setPolicyLevel(lvl.id)}
+                  >
+                    {lvl.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>

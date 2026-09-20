@@ -19,6 +19,7 @@ export const K = {
 export const SK = {
   checkState: 'checkState',
   guardStates: 'guardStates',
+  tabSessions: 'tabSessions',
 } as const;
 
 export const SCHEMA_VERSION = 1;
@@ -73,6 +74,7 @@ export const DEFAULT_SETTINGS: Settings = {
   timeoutMs: 5000,
   recheckMinutes: 30,
   webrtcProtect: true,
+  trafficValidationLevel: 'relaxed',
   habitEnabled: true,
   notifySuggestions: true,
   suggestWindowDays: 14,

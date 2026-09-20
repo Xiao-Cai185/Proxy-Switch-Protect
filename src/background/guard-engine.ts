@@ -13,6 +13,13 @@ import {
 } from '../shared/storage';
 import type { CheckState, GuardState, ProtectedSite } from '../shared/types';
 import { activeKeyOf, ensureCheck } from './ip-checker';
+import {
+  clearAllTabSessions,
+  isCheckStateMatching,
+  isTabSessionVerified,
+  markTabVerified,
+  resolveEffectiveLevel,
+} from './traffic-policy';
 
 /**
  * 守护引擎：核心为 fail-closed 状态机。
@@ -153,6 +160,9 @@ async function recomputeFromCheck(
   }
 
   await _setAll(sites, states);
+  if (newlyLocked.length > 0) {
+    await clearAllTabSessions();
+  }
   if (notify) for (const { site, cc } of newlyLocked) notifyLocked(site, cc);
 }
 
@@ -191,14 +201,68 @@ const ACCESS_DEBOUNCE_MS = 1500;
 
 /**
  * 访问名单域名 / 重新打开命中标签页：
- * 立刻 DNR 锁定（checking），再强制发起新的落地 IP 检测。
- * 禁止复用旧结果，避免「上次是对的 → 代理已漂 → 意外放行」。
+ * 支持三种流量策略：
+ * 1. strict（严格模式）：开屏/切页/更新均强制锁屏加检，不复用旧结果。
+ * 2. sampling（抽样模式）：开屏必检，若已通过开屏校验则放行后续交互（由 webRequest 抽样触发平滑二次校验）。
+ * 3. relaxed（宽松效率模式）：只对开屏请求校验，校验通过后后续页面内交互直接放行。
  */
-export async function onProtectedAccess(url: string): Promise<void> {
-  const sites = await loadSites();
+export async function onProtectedAccess(url: string, tabId?: number): Promise<void> {
+  const [sites, settings] = await Promise.all([loadSites(), loadSettings()]);
   const hits = matchingSites(url, sites);
   if (hits.length === 0) return;
 
+  // 1. 如果带有有效 tabId，先判定是否已在宽松模式或抽样模式下通过开屏验证
+  if (typeof tabId === 'number' && tabId > 0) {
+    let allSessionsValid = true;
+    for (const site of hits) {
+      const level = resolveEffectiveLevel(site, settings);
+      if (level === 'strict') {
+        allSessionsValid = false;
+        break;
+      }
+      const isVerified = await isTabSessionVerified(tabId, site.id);
+      if (!isVerified) {
+        allSessionsValid = false;
+        break;
+      }
+    }
+    // 若命中站点的开屏会话均已获放行许可，后续页面内交互流量直接放行！
+    if (allSessionsValid) {
+      return;
+    }
+  }
+
+  // 2. 针对开屏请求，检查当前是否已有新鲜且合规的检测结果（针对 sampling 与 relaxed 模式）
+  const cs = await getCheckState();
+  const activeKey = activeKeyOf(await loadActiveProfileId());
+  const webrtcProtect = settings.webrtcProtect !== false;
+  const prevStates = await getGuardStates();
+
+  if (typeof tabId === 'number' && tabId > 0) {
+    let canDirectAllow = true;
+    for (const site of hits) {
+      const level = resolveEffectiveLevel(site, settings);
+      if (level === 'strict') {
+        canDirectAllow = false;
+        break;
+      }
+      const siteAllowed = prevStates[site.id]?.status === 'allowed' || prevStates[site.id]?.status === 'bypass';
+      const checkValid = isCheckStateMatching(site, cs, activeKey, webrtcProtect);
+      if (!siteAllowed || !checkValid) {
+        canDirectAllow = false;
+        break;
+      }
+    }
+
+    if (canDirectAllow) {
+      for (const site of hits) {
+        await markTabVerified(tabId, site.id, site.domainPattern);
+      }
+      return;
+    }
+  }
+
+  // 3. 严格模式或未就绪的开屏请求：加锁并强制执行验证
   const key = hits
     .map((h) => h.id)
     .sort()
@@ -228,11 +292,59 @@ export async function onProtectedAccess(url: string): Promise<void> {
     }
     await _setAll(sites, states);
   });
-  await recheckAndApply(true);
+
+  const nextCs = await recheckAndApply(true);
+
+  // 4. 验证完成后，若放行且有 tabId，记录开屏放行会话
+  if (typeof tabId === 'number' && tabId > 0 && nextCs.status === 'ok') {
+    const currentStates = await getGuardStates();
+    for (const site of hits) {
+      if (currentStates[site.id]?.status === 'allowed' || currentStates[site.id]?.status === 'bypass') {
+        await markTabVerified(tabId, site.id, site.domainPattern);
+      }
+    }
+  }
+}
+
+/**
+ * 抽样检测二级复核：
+ * 针对 Level 2（抽样模式）后续交互流量，异步后台比对当前 IP 是否依然合规。
+ * 不在检测前盲目阻断子资源；仅在检测确认违规时才触发锁定。
+ */
+export async function triggerSamplingCheck(siteId: string): Promise<void> {
+  const [sites, settings, activeId] = await Promise.all([
+    loadSites(),
+    loadSettings(),
+    loadActiveProfileId(),
+  ]);
+  const site = sites.find((s) => s.id === siteId && s.enabled);
+  if (!site) return;
+
+  const cs = await getCheckState();
+  const activeKey = activeKeyOf(activeId);
+  const webrtcProtect = settings.webrtcProtect !== false;
+
+  // 若当前已有新鲜有效的结果且匹配，平滑放行
+  if (isCheckStateMatching(site, cs, activeKey, webrtcProtect)) {
+    return;
+  }
+
+  // 否则后台发起静默复检
+  try {
+    const newCs = await ensureCheck(true);
+    if (!isCheckStateMatching(site, newCs, activeKey, webrtcProtect)) {
+      await clearAllTabSessions();
+      await lockAndRecheck('抽样复检发现落地 IP 漂移或未满足安全策略');
+    }
+  } catch {
+    await clearAllTabSessions();
+    await lockAndRecheck('抽样复检无法确认落地 IP，已中断访问');
+  }
 }
 
 /** SW / 浏览器启动：默认全锁，再强制验 IP */
 export async function initGuard(): Promise<void> {
+  await clearAllTabSessions();
   await serialize(async () => {
     const sites = await loadSites();
     const now = Date.now();
@@ -252,6 +364,7 @@ export async function initGuard(): Promise<void> {
 
 export async function lockAndRecheck(reason: string): Promise<CheckState> {
   await clearBypassAlarms();
+  await clearAllTabSessions();
   await serialize(async () => {
     const sites = await loadSites();
     const now = Date.now();
@@ -272,6 +385,7 @@ export async function recheckAndApply(_force = true): Promise<CheckState> {
 }
 
 export async function onSitesChanged(): Promise<void> {
+  await clearAllTabSessions();
   // 规则变更后先锁再强制验，避免旧 ok 直接放行新规则
   await serialize(async () => {
     const sites = await loadSites();
@@ -342,6 +456,7 @@ export async function onBypassExpired(_siteId: string): Promise<void> {
 
 export async function relockAll(): Promise<void> {
   await clearBypassAlarms();
+  await clearAllTabSessions();
   await serialize(async () => {
     const cur = await getCheckState();
     await recomputeFromCheck(cur, false, true);
