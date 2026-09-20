@@ -18,7 +18,7 @@ import {
 import type { ProxyProfile } from '../shared/types';
 import * as guard from './guard-engine';
 import { acceptSuggestion, dismissSuggestion, initHabitLearner } from './habit-learner';
-import { testChecker } from './ip-checker';
+import { testChecker, testProfileIsolated } from './ip-checker';
 import {
   applyProfileById,
   getLevelOfControl,
@@ -133,11 +133,18 @@ async function handleCommand(cmd: BgCommand): Promise<unknown> {
     case 'pauseGuard':
       return guard.pauseAll(cmd.minutes ?? 5);
     case 'acceptSuggestion':
-      return acceptSuggestion(cmd.domain, cmd.countryCode);
+      return acceptSuggestion(
+        cmd.domain,
+        cmd.countryCode,
+        cmd.expectedIpRanges,
+        cmd.matchMode,
+      );
     case 'dismissSuggestion':
       return dismissSuggestion(cmd.domain);
     case 'testChecker':
       return testChecker(cmd.checker);
+    case 'testProfile':
+      return testProfileIsolated(cmd.profileId);
     case 'getLevelOfControl':
       return getLevelOfControl();
     default:

@@ -71,7 +71,7 @@ export const DEFAULT_CHECKERS: CheckerConfig[] = [
 export const DEFAULT_SETTINGS: Settings = {
   checkers: DEFAULT_CHECKERS,
   timeoutMs: 5000,
-  recheckMinutes: 10,
+  recheckMinutes: 30,
   webrtcProtect: true,
   habitEnabled: true,
   notifySuggestions: true,
@@ -93,7 +93,7 @@ export const PROFILE_COLORS = [
   '#22c55e',
   '#f59e0b',
   '#ef4444',
-  '#8b5cf6',
+  '#baa5fd',
   '#06b6d4',
   '#ec4899',
   '#64748b',

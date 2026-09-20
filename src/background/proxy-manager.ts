@@ -90,6 +90,74 @@ export async function reapplyActiveProfile(): Promise<boolean> {
   return true;
 }
 
+/* ---------- 独立测试与 PAC 动态分流管线 ---------- */
+
+let currentTestingProfile: ProxyProfile | null = null;
+
+export function setTestingProfile(p: ProxyProfile | null): void {
+  currentTestingProfile = p;
+}
+
+export function toPacProxyString(p: ProxyProfile | 'direct' | 'system' | null): string {
+  if (!p || p === 'direct' || p === 'system') return 'DIRECT';
+  if (p.scheme === 'socks5') return `SOCKS5 ${p.host}:${p.port}; SOCKS ${p.host}:${p.port}; DIRECT`;
+  if (p.scheme === 'socks4') return `SOCKS ${p.host}:${p.port}; DIRECT`;
+  if (p.scheme === 'https') return `HTTPS ${p.host}:${p.port}; PROXY ${p.host}:${p.port}; DIRECT`;
+  return `PROXY ${p.host}:${p.port}; DIRECT`;
+}
+
+export function buildTestPacScript(
+  testProfile: ProxyProfile,
+  activeProfile: ProxyProfile | 'direct' | 'system' | null,
+  customHosts: string[] = [],
+): string {
+  const testStr = toPacProxyString(testProfile);
+  const activeStr = toPacProxyString(activeProfile);
+  const defaultProbeHosts = [
+    'icanhazip.com',
+    'ident.me',
+    'ipify.org',
+    'ipwho.is',
+    'freeipapi.com',
+    '3322.net',
+  ];
+  const allHosts = Array.from(new Set([...defaultProbeHosts, ...customHosts]));
+  const hostsJson = JSON.stringify(allHosts);
+
+  return `
+function FindProxyForURL(url, host) {
+  var probeHosts = ${hostsJson};
+  for (var i = 0; i < probeHosts.length; i++) {
+    if (dnsDomainIs(host, probeHosts[i]) || host === probeHosts[i]) {
+      return "${testStr}";
+    }
+  }
+  return "${activeStr}";
+}
+`;
+}
+
+export async function applyRawProxyConfig(config: unknown): Promise<void> {
+  await proxySet(config);
+}
+
+export async function restoreActiveProxy(): Promise<void> {
+  const activeId = await loadActiveProfileId();
+  if (!activeId || activeId === 'direct') {
+    await proxySet({ mode: 'direct' });
+  } else if (activeId === 'system') {
+    await proxyClear();
+  } else {
+    const profiles = await loadProfiles();
+    const profile = profiles.find((p) => p.id === activeId);
+    if (profile) {
+      await proxySet(buildFixedConfig(profile));
+    } else {
+      await proxySet({ mode: 'direct' });
+    }
+  }
+}
+
 /* ---------- HTTP(S) 代理认证 ---------- */
 
 const authAttempts = new Map<string, number>();
@@ -104,7 +172,10 @@ export function initAuthListener(): void {
             loadProfiles(),
             loadActiveProfileId(),
           ]);
-          const p = profiles.find((x) => x.id === activeId);
+          let p = profiles.find((x) => x.id === activeId);
+          if (currentTestingProfile?.auth && (!p?.auth || details.challenger?.host === currentTestingProfile.host)) {
+            p = currentTestingProfile;
+          }
           if (!p?.auth || (p.scheme !== 'http' && p.scheme !== 'https')) {
             return asyncCallback?.({});
           }

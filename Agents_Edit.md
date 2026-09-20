@@ -200,5 +200,325 @@ Popup 弹窗右上角已具备直观的齿轮设置图标按钮（`<SettingsIcon
 - **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项测试 **100% 通过**。
 - **生产环境打包 (Vite)**：执行 `npm run build`，成功输出包含 `blocked.html`、`options.html`、`popup.html` 的生产资源包。
 
+---
+
+### [2026-09-06] 六项高阶安全与效率功能演进（智能自愈修复、自学习录入严格度、RTT 延迟测量、配置备份与链接解析、隐私跳转工具集、内外分流检测）
+
+#### 1. 需求背景与功能目标
+用户提出了 6 项系统级安全防护与易用性增强诉求：
+1. **安全拦截页智能自愈修复**：前提条件必须是插件内检测到有符合当前受阻网站期望（匹配允许国家/IP段）的已配置代理节点时，才在 `blocked.html` 呈现一键修复卡片；点击后自动无缝切换该合规节点并自动重定向回原网站。
+2. **养号策略自学习严格度确认**：在原有域名与国家学习的基础上，引入代理落地真实 IP 样本（`sampleIp`）的自动捕获；用户在自学习确认面板（HabitsTab）中可自主选择录入规则的严格程度（“标准国家匹配”或“严苛 /24 子网匹配”）。
+3. **RTT 延迟测量与全景呈现**：在代理落地检测时精确测量 HTTP 往返时延（`rttMs`），持久化保存并在代理档案卡片（ProfilesTab）及网络面板中通过带颜色区分的时延徽章（如 `⚡ 85ms`）清晰体现。
+4. **配置备份导入导出与快捷链接解析**：支持将所有代理配置一键导出为纯文本 JSON 备份文件，并支持从 JSON 导入合并；在代理添加面板支持粘贴 `socks5://`、`http://`、`https://` 代理 URL 快捷识别解析并自动填充表单。
+5. **网络隐私与质量跳转工具集**：在落地网络状态面板中添加一键诊断快捷超链接按钮：
+   - `https://ip.net.coffee/`（IP 质量评分与 DNS 泄露检测）
+   - `https://www.ip2location.com/{ip}`（IP2Location 深度归属、ASN 与运营商查询）
+   - `https://browserleaks.com/webrtc`（WebRTC STUN/ICE 真实公网穿透泄露检测）
+6. **内外分流检测与全局代理安全风控**：检测代理服务是否做了内外分流（访问国内接口返回大陆真实 IP，而访问海外返回国外代理 IP）。在代理档案界面标记 `⚠️ 非全局分流`；同时作为安全阻断界面的重要风险评分维度（计入阻断风险评估）。
+
+#### 2. 技术实现与架构演进
+- **方向一：智能条件自愈修复引擎 (blocked/App.tsx & blocked.css)**：
+  - 在 `blocked/App.tsx` 中建立 `healingCandidate` 计算逻辑：遍历所有可用代理档案（排除当前激活节点），对照当前站点的 `expectedCountries` 和 `expectedIpRanges` 进行严格匹配。
+  - **严格前提约束**：若没有任何可用档案满足该站点的规则期望，自愈卡片**坚决不显示**，避免误导；只有存在匹配档案时，才在拦截页显眼位置渲染 Emerald 翡翠流光渐变配色的 `.blocked-heal-card`。
+  - 用户点击「立即切换并访问」时，后台调用 `switchProfile` 一键激活该合规节点，并自动执行 `window.location.replace(targetUrl)` 重新跳转，实现一键闭环自愈。
+- **方向二：自学习录入严格度确认与样本 IP 捕获 (habit-learner.ts, HabitsTab.tsx & messages.ts)**：
+  - 数据模型升级：在 `Suggestion` 接口中扩展 `sampleIp?: string` 字段；在 `BgCommand.acceptSuggestion` 指令中扩展 `expectedIpRanges?: string[]` 与 `matchMode?: 'any' | 'all'`。
+  - 学习器采样：在 `src/background/habit-learner.ts` 中，当触发阈值生成推荐建议时，将当时检测到的落地 IPv4 地址记入 `sampleIp`。
+  - 确认录入面板交互重构：在 `HabitsTab.tsx` 中，用户点击「采纳并创建规则」时展开自学习确认面板：
+    - **标准国家匹配**：仅将主导国家/地区加入规则，适合动态住宅代理池或大型 CDN 节点。
+    - **严苛 /24 子网匹配**：基于捕获的 `sampleIp` 自动计算提取前三个段（如 `104.28.19.0/24`），实现子网级严苛锁定，强力防御跳池封号风险。
+- **方向三：高精度 RTT 往返时延测量 (dual-stack.ts, types.ts & ProfilesTab.tsx)**：
+  - 在 `src/shared/types.ts` 中的 `ProfileCheckResult` 和 `ExitIpResult` 中扩充 `rttMs?: number` 属性。
+  - 在 `src/shared/dual-stack.ts` 中，以请求发起时刻 `startTime = Date.now()` 为基准，在成功响应并解析完成时刻计算 `rttMs = Date.now() - startTime`。
+  - 延迟指标持久化保存至 `profileChecks` 存储映射表中，在 `ProfilesTab.tsx` 的节点卡片中根据时延梯队渲染颜色徽章：`<250ms` 绿色极速、`<800ms` 橙黄良好、`>=800ms` 红色高延迟。
+- **方向四：JSON 备份导入导出与代理链接一键解析 (ProfilesTab.tsx)**：
+  - 在 `ProfilesTab.tsx` 顶部操作栏中新增「导出 JSON」与「导入 JSON」工具按钮，支持独立导出 `proxy-profiles-backup-*.json`，导入时支持智能合并去重与自动补全 UUID。
+  - 在新建/编辑表单顶部新增「快速解析」交互栏，内建正则解析函数 `parseProxyUrl`：
+    - 兼容匹配 `socks5://[user:pass@]host:port[#name]`、`http://`、`https://` 格式标准 URI；
+    - 自动提取协议、地址、端口、用户名、密码与 Hash 备注名，一键填表并给予友好的即时解析反馈。
+- **方向五：网络隐私与质量跳转工具集 (ExitIpPanel.tsx)**：
+  - 在公共组件 `ExitIpPanel.tsx` 中新增紧凑精致的 `.exit-toolkit` 跳转工具栏，集成 `ExternalLink` 矢量图标：
+    - 一键直达 `https://ip.net.coffee/` 进行 IP 欺诈度打分与 DNS 污染泄露探测；
+    - 一键直达 `https://www.ip2location.com/${ip}` 进行深度归属地与 ASN 运营商核验；
+    - 一键直达 `https://browserleaks.com/webrtc` 检测 WebRTC 是否穿透代理泄漏真实本地公网 IP。
+- **方向六：内外分流非全局代理检测与风险评估模型 (dual-stack.ts, ProfilesTab.tsx & blocked/App.tsx)**：
+  - 双探针分流探测：在 `src/shared/dual-stack.ts` 中实现 `fetchDomesticIp('https://ip.3322.net')`；当代理访问海外节点为境外 IP（非 CN），而访问国内探针返回有效国内 IP 且与海外 IP 不一致时，判定为 `isSplitTunnel: true`。
+  - 卡片与面板安全警示：在 `ProfilesTab.tsx` 代理卡片中显著呈现 `⚠️ 非全局分流` 警示标签（全局代理则显示 `🌐 全局代理`）；在 `ExitIpPanel.tsx` 中呈现内外分流风险警示条。
+  - 安全阻断界面风控评分加权：在 `blocked/App.tsx` 风险评分模型中加入非全局代理风险因子（分流 +20 分，并在风险详情中提示“检测到代理存在内外分流，境内域名直连国内网络，存在目标域名绕过代理被平台风控的隐患”）。
+
+#### 3. 验证与回归测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，全项目 **0 错误、0 警告**。
+- **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项测试 **100% 通过**。
+- **生产环境打包 (Vite)**：执行 `npm run build`，成功编译输出 `dist/`，全部前端页面与 Service Worker 均无异常。
+
+---
+
+### [2026-09-06] 代理单节点隔离检测落地 BUG 修复与「当前站点一键加护」卡片演进
+
+#### 1. 需求背景与问题诊断
+1. **代理档案检测导致代理被动切换 BUG 修复**：
+   - **问题现象**：在代理档案卡片中点击「检测落地」时，非激活节点的检测代码直接调用了 `switchProfile`，导致当前浏览器的全局代理与激活档案被动切换为被检测的节点，破坏了用户的网络连续性。
+   - **优化诉求**：点击检测仅用于单条代理的探测与更新，绝不改变当前浏览器的代理设置；只有在用户主动点击「切换到」按钮时才执行切换；检测使用的管线必须与当前浏览器实际代理实现完全隔离。
+2. **「当前站点一键加护」卡片按钮功能实现**：
+   - **功能目标**：在 Popup 弹窗中自动读取当前活跃标签页的 URL 域名、当前代理服务器名称、真实出口 IP、落地国家地区，当即供用户按需选择严格程度（标准国家、严苛 /24 网段、锁定单一 IP）并一键保存为新的守护规则，实现即开即护。
+
+#### 2. 技术实现细节
+- **代理独立测试与 PAC 隔离管线 (proxy-manager.ts, ip-checker.ts & ProfilesTab.tsx)**：
+  - 在 `src/background/proxy-manager.ts` 中实现 `buildTestPacScript(testProfile, activeProfile, customHosts)`：
+    - 采用 Chromium 原生 PAC 脚本机制：仅将探测相关的指定探针域名（`icanhazip.com`, `ident.me`, `ipify.org`, `ipwho.is`, `freeipapi.com`, `3322.net` 等）导流至待测代理；
+    - 其余所有网站流量继续保持走当前实际激活的代理（或直连），彻底做到检测流量与业务流量物理隔离。
+  - 在 `src/background/ip-checker.ts` 中实现 `testProfileIsolated(profileId)`：
+    - 针对非激活节点，临时应用 PAC 脚本并在 `finally` 结构中必定调用 `restoreActiveProxy()` 恢复原始代理；
+    - 检测结果写入 `profileChecks[profileId]`，绝不更改 `activeProfileId`，不污染全局 `checkState`；
+    - 支持代理 HTTP 认证隔离凭据传递（`setTestingProfile`）。
+  - 在 `src/background/index.ts` 消息中心注册 `testProfile` 指令并在 `src/shared/messages.ts` 扩展类型。
+  - 在 `src/pages/options/tabs/ProfilesTab.tsx` 中将 `checkProfileIp` 的非激活分支从 `switchProfile` 切换为 `testProfile`，点击「检测落地」仅刷新当前卡片信息，用户点击「切换到」才调用 `switchProfile`。
+- **「当前站点一键加护」专属卡片 (popup/App.tsx & popup.css)**：
+  - **当前标签页自动识别**：在 `popup/App.tsx` 加载时通过 `chrome.tabs.query({ active: true, currentWindow: true })` 读取激活标签页 URL 并提取规范化域名（忽略 `chrome://` 等本地页面）。
+  - **未加护状态（一键加护）**：
+    - 展示当前网络四要素网格（访问域名、当前代理服务器、落地出口 IP、落地国家地区 Flag）。
+    - 引入三档严格度选择器：
+      - **标准国家**：仅绑定国家代码，适合动态住宅池。
+      - **严苛 /24 网段**：提取当前 IP 的前三段（`x.x.x.0/24`），防跳池、防跨机房异地风控。
+      - **锁定单一 IP**：严格限定当前单一出口（`/32`），适合独享固定静态原生 IP。
+    - 点击「一键开启加护」即刻生成 `ProtectedSite`，写入 `sites` 存储，触发 `guard.onSitesChanged()` 毫秒级应用 Fail-Closed 保护。
+  - **已加护状态（实时看板）**：
+    - 自动匹配已有规则（`urlMatchesDomain`），展示「当前网站已受安全守护」卡片、实时放行/拦截状态胶囊、绑定的期望国家国旗及限定 IP 网段。
+  - **样式与微动效**：在 `popup.css` 中增加科技高光侧边条、毛玻璃卡片 `.current-site-card` 与 `.strict-selector` 胶囊交互设计。
+
+#### 3. 验证与回归测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，全项目 **0 错误、0 警告**。
+- **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项核心测试 **100% 通过**。
+- **生产环境打包 (Vite)**：执行 `npm run build`，成功打包输出全部扩展产物。
+
+---
+
+### [2026-09-06] 项目版本号正式跃升至 v3.0.1
+- **版本号同步更新**：
+  - `public/manifest.json`：`"version": "3.0.1"`
+  - `package.json`：`"version": "3.0.1"`
+  - `package-lock.json`：`"version": "3.0.1"`
+- **产物构建与验证**：执行 `npm run build`，重新生成并打包生产环境资源，Popup 弹窗及 Options 控制台顶部动态展示版本号已全面更新为 `v3.0.1`。
+
+---
+
+### [2026-09-06] 彻底解决「当前网站一键加护」卡片被压缩排版缺陷
+- **深度根因排查**：
+  1. **Chrome 扩展宿主弹窗视口机制**：之前仅针对 `.popup-body` 声明了 `width: 416px`，但 MV3 Action Popup 宿主窗口尺寸优先由根元素 `<html>` 决定。若 `html` 缺少明确的 `width` 与 `min-width`，Chromium 会在 Windows 桌面高 DPI 缩放（如 125%/150%）及垂直滚动条（17px）出现时，自动将弹窗可用宽度压缩至 340px 左右。
+  2. **Flexbox 纵向弹性挤压 Bug**：`.popup` 容器使用了 `display: flex; flex-direction: column; max-height: 600px; overflow-y: auto;`，但子项缺少 `flex-shrink: 0;`。当弹窗中包含落地卡片、一键加护、习惯推荐、代理列表等多重元素超出 600px 时，CSS Flexbox 会在触发滚动条前优先压缩子项高度，导致加护卡片被垂直压扁逼仄。
+  3. **胶囊按钮折行挤压**：`.strict-selector` 内部按钮由于未强制 `white-space: nowrap`，文字在较窄栅格中出现偶发折行（如 `/24 子网` 与 `掩码` 分开两行），高度参差不齐。
+  4. **Flex 元素未声明 min-width 0**：目标域名通栏行及环境信息行缺少 `min-width: 0; flex: 1` 约束，右侧标签和左侧文字互相争抢宽度。
+- **针对性重构方案**：
+  1. **视口双层硬锁与宽幅拓展**：在 `popup.css` 中同时对 `html` 与 `body.popup-body` 声明 `width: 460px; min-width: 460px; overflow-x: hidden;`，全面提升可用视口宽度，消除窄窗问题。
+  2. **弹性纵向挤压全局清零**：为 `.popup > *` 及 `.current-site-card` 配置 `flex-shrink: 0;`，确保所有卡片始终维持原始丰满的内边距与自然高度，仅通过垂直滚动条承载长列表。
+  3. **选择器抗折行与文案精修**：按钮文字添加 `white-space: nowrap;`，精简文案为「标准国家（限 XX）」、「同机房网段（/24 网段）」、「单一出口（单一 IP (/32)）」，网格间距微调为 `8px`，左右留白充裕美观。
+  4. **域名通栏流式抗挤压**：引入 `Globe` 矢量地球图标，采用 `minWidth: 0, flex: 1` 配合 `ellipsis`，超长域名优雅省略截断，右侧状态小胶囊 `flex: none` 绝对不被推挤。
+- **验证与产物构建**：
+  - **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，全项目 **0 错误、0 警告**。
+  - **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项测试 **100% 通过**。
+  - **生产构建打包 (Vite)**：执行 `npm run build`，成功编译输出至 `dist/`，最新 CSS 与 JS 产物生效。
+
+---
+
+### [2026-09-06] 色卡自助调色盘拓展与选中态/沉浸光晕色彩动态联动
+- **功能背景与目标**：
+  提升用户对代理节点色彩标记的自由度与面板视觉沉浸感。通过色盘允许自主选取任意自定义色，并让当前选中节点与整体面板的背景渐变光晕跟随该颜色联动。
+- **具体改造内容**：
+  1. **色卡自助调色盘与 Hex 预览**：
+     - 在控制台「代理档案」编辑表单中，除原有 8 种高频预设色卡外，增加了带 Palette 图标的全色域「自助调色盘」取色器；
+     - 增加实时十六进制色值标签（如 `#8B5CF6`），支持直观识别与高亮反馈；自定义色选中时带有专属柔光外发光。
+  2. **小面板被选中项淡色微光渐变**：
+     - 小面板中 `.list-row.profile-row.profile-active` 采用基于当前节点颜色的横向淡色渐变 `linear-gradient(90deg, rgba(color, 0.16) 0%, rgba(color, 0.03) 100%)`；
+     - 节点活跃标识 `.profile-active-check` 与外边框光晕同步采用节点专属色彩渲染，打通直连模式（翡翠绿）、系统代理（灰蓝）与所有自定义节点。
+  3. **整体面板右下角沉浸光晕联动**：
+     - 将小面板右下角固定紫色光晕 `radial-gradient(80% 50% at 100% 100%, var(--purple-glow))` 升级为动态 CSS 变量 `var(--active-theme-glow)`；
+     - 「当前网站一键加护」卡片右下角微光与高光装饰边条亦同步自适应当前激活节点的主色调，切换节点时呈现丝滑的沉浸光影流转。
+- **验证与构建**：
+  - `tsc --noEmit` 静态类型检查 **0 错误**；
+  - `npm test` 单元测试全部 45 项测试 **100% 通过**；
+  - `npm run build` 成功完成打包构建，产物全面写入 `dist/`。
+
+---
+
+### [2026-09-06] 模版色卡默认颜色绑定与档案编辑无感/防丢切换机制
+
+#### 1. 需求背景与问题诊断
+1. **模版色卡默认颜色绑定**：
+   - 用户诉求：Clash Verge 模版组默认使用 `#BAA5FD`（标志性淡紫）；V2RayN 默认使用 `#3B82F6`（科技蓝）。在套用模板及客户端图标切换时需同步应用对应专属色卡。
+2. **编辑状态无感与防丢切换机制**：
+   - **问题现象**：在编辑一个档案时，点击列表中另一份档案的“编辑”按钮表单无法自动切换，内容仍停留在之前的档案。
+   - **根因分析**：`<ProfileForm />` 组件内部使用 `useState(initial?.xxx)` 初始化状态，且外层挂载时缺少唯一的 `key` 绑定。当父组件的 `editing` 切换为另一份档案时，React 默认复用既有 DOM 与组件实例，导致 `useState` 初始值未被重新求值，表单死锁在旧档案。
+   - **防误触诉求**：检测用户当前表单是否有实际修改行为（Dirty Checking）。若表单发生过实质修改，用户点击切换至其他档案编辑或新建时弹出二次确认提示保存或放弃；若无任何修改行为，直接无感切换到目标档案的编辑表单。
+
+#### 2. 技术实现细节 (ProfilesTab.tsx)
+- **模版与客户端图标颜色联动**：
+  - 在 `src/pages/options/tabs/ProfilesTab.tsx` 中更新 `TEMPLATES` 常量，Clash Verge 色彩配置为 `#BAA5FD`，V2RayN 配置为 `#3B82F6`。
+  - 在 `ProfileForm` 客户端图标切换处理中，点击「V2RayN 图标」同步设置 `color: #3B82F6`，点击「Clash Verge 图标」同步设置 `color: #BAA5FD`。
+- **表单脏状态检测 (Dirty Checking)**：
+  - 在 `ProfileForm` 内部通过 `useMemo` 实时监测 9 项核心配置状态（`name`, `scheme`, `host`, `port`, `username`, `password`, `bypass`, `color`, `icon`, `quickUrl`）。
+  - 与初始值 `initial` 进行严格一致性判定（其中 `color` 进行大小写不敏感比对，`bypass` 进行空行去除规整）。一旦任一字段被用户键入或修改，即标记为 `isDirty: true`，并通过 `onDirtyChange` 实时通知父级控制器。
+- **安全调度器与无感刷新 (requestEdit & key 机制)**：
+  - 在父组件 `ProfilesTab` 中实现调度器 `requestEdit(target: ProxyProfile | 'new')`：
+    - 若目标为当前正在编辑的档案，直接返回；
+    - 若当前表单处于 `isDirty: true` 状态，触发 `window.confirm` 提示用户是否放弃未保存的修改；若用户点击「取消」则留在当前编辑表单以便保存；若确认放弃则允许切换；
+    - 若无修改行为或已确认放弃，立即更新 `editing` 状态。
+  - 为 `<ProfileForm />` 注入唯一键 `key={editing === 'new' ? 'new' : editing.id}`：
+    - 切换目标时触发 React 彻底销毁旧实例并按新 `initial` 数据重新挂载，彻底根除表单死锁未切换缺陷。
+  - 同步优化表头「新增代理档案」按钮、列表项「编辑」按钮（编辑中状态高亮）以及「取消」按钮的防丢保护。
+
+#### 3. 验证与回归测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，全项目 **0 错误、0 警告**。
+- **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项核心测试 **100% 通过**。
+- **生产构建打包 (Vite)**：执行 `npm run build`，成功在 805ms 内构建输出全部生产资源，静态代码已全面同步至 `dist/`。
+
+---
+
+### [2026-09-07] 网络隐私与质量检测工具集下移至 Footer、节点延迟紧随国旗展示与版本跃升至 v3.1.5
+
+#### 1. 需求背景与功能目标
+1. **网络隐私与质量检测工具集布局优化**：
+   - 原先在 `ExitIpPanel.tsx` 中，工具栏夹在 IP 详情信息与卡片底部元数据（`exit-meta`）之间，割裂了 IP 检测源和检测时间的信息连续性。
+   - 用户诉求：将「网络隐私与质量检测工具集」统一放置在卡片下方的 Footer 区域。
+2. **节点选项延迟信息位置调整**：
+   - 用户诉求：将 `⚡ 164ms` 延迟信息紧随放置在代理档案节点选项的国旗后，使落地国家、国旗与往返延迟浑然一体，方便在小面板（Popup）与控制台（Options）中一眼纵览代理质量。
+3. **版本号统一升级**：
+   - 将插件整体版本跃升为 `v3.1.5`，并重新完成全链路生产构建与打包。
+
+#### 2. 技术实现细节
+- **工具集沉底卡片 Footer (ExitIpPanel.tsx)**：
+  - 调整组件 JSX 布局流：将原本位于中间的 `.exit-toolkit` 移至 `exit-meta`（源和检测时间）下方，作为卡片最底部的独立 Footer 区域（附加 `.exit-card-footer` 样式）。
+  - 保留 IP 质量/DNS 泄露、IP2Location 归属与 WebRTC 穿透检测三大快捷跳转链接，边框采用虚线分割，卡片排版主次更加分明。
+- **节点选项延迟紧随国旗后展示 (popup/App.tsx & ProfilesTab.tsx)**：
+  - **Popup 小面板 (`ProfileRow`)**：在 `<Flag cc={...} />` 及国家代号标签后追加 `{typeof props.lastCheck.rttMs === 'number' && <span className="mono">⚡ {props.lastCheck.rttMs}ms</span>}`，让用户在弹窗节点列表中即可直观感知节点测速延迟。
+  - **Options 控制台 (`ProfilesTab.tsx`)**：将原先独立浮在后方的延迟标签整合进国旗信息胶囊内部，紧随 `<Flag />` 后渲染高亮延迟数值（根据延迟大小自适应绿/橙/红三色），并紧邻出口 IP，布局更为紧凑专业。
+- **全项目版本号跃升至 v3.1.5**：
+  - `public/manifest.json`：`"version": "3.1.5"`
+  - `package.json`：`"version": "3.1.5"`
+  - `package-lock.json`：`"version": "3.1.5"`
+
+#### 3. 验证与回归测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，全项目 **0 错误、0 警告**。
+- **生产构建打包 (Vite)**：执行 `npm run build`，成功耗时 750ms 重新编译生成 `dist/`，所有页面动态读取版本号均为 `v3.1.5`。
+
+---
+
+### [2026-09-07] 网络隐私与质量检测工具集移至全局卡片 Footer、删除 exit-meta 与清理延迟小闪电 Emoji
+
+#### 1. 需求背景与功能目标
+1. **网络隐私与质量检测工具集全局沉底**：
+   - 之前将工具集仅置于落地 IP 卡片底部；用户明确要求将该工具集放置在**整个 Proxy Protect 卡片的 Footer 区域**，即位于「域名安全守护板块」之后，作为弹窗最底部的全功能工具栏。
+2. **清理冗余元数据行**：
+   - 彻底删除 `ExitIpPanel.tsx` 中的 `<div className="row-between muted small exit-meta">`（包含源和更新时间），消除单体卡片底部繁杂信息，视觉更聚焦。
+3. **精简延迟显示 Emoji**：
+   - 移除代理列表中往返延迟前的小闪电 Emoji（`⚡ `），仅保留清晰整洁的数值与单位（如 `164ms`），消除视觉冗余。
+
+#### 2. 技术实现细节
+- **整个 Proxy Protect 卡片 Footer 重构 (popup/App.tsx & popup.css)**：
+  - 从 `ExitIpPanel.tsx` 中彻底移除 `exit-toolkit` 及未使用的 `ExternalLink`、`timeAgo` 依赖。
+  - 在 `src/pages/popup/App.tsx` 中，将工具集移至域名安全守护 `<section className="popup-section">` 之后，作为整个弹窗的 `<footer className="popup-footer exit-toolkit">`。
+  - 动态读取检测到的公网 IP（`checkState?.result?.ipv4 || checkState?.result?.ip`），自动绑定至 IP2Location 归属地深度查询链接；同时保留 IP 质量/DNS 泄露与 WebRTC 穿透检测两大快捷链接。
+  - 在 `popup.css` 中为 `.popup-footer` 配置内边距、虚线边框与卡片背景底衬。
+- **删除 exit-meta 元数据行 (ExitIpPanel.tsx)**：
+  - 移除 `<div className="row-between muted small exit-meta">`，落地 IP 卡片在双栈/分流提示后直接自然闭合。
+- **清理代理列表往返延迟小闪电 Emoji (popup/App.tsx & ProfilesTab.tsx)**：
+  - 在 Popup 的 `ProfileRow` 中将 `⚡ {props.lastCheck.rttMs}ms` 改为 `{props.lastCheck.rttMs}ms`。
+  - 在 Options 控制台的 `ProfilesTab.tsx` 中将 `⚡ {check.rttMs}ms` 改为 `{check.rttMs}ms`。
+
+#### 3. 验证与回归测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，全项目 **0 错误、0 警告**。
+- **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项核心测试 **100% 通过**。
+- **生产构建打包 (Vite)**：执行 `npm run build`，成功编译输出全部生产资源至 `dist/`，耗时 728ms。
+
+---
+
+### [2026-09-07] 面板延迟绿黄红三色动态分级展示与后台静默周期复检间隔默认调整为 30 分钟
+
+#### 1. 需求背景与功能目标
+1. **面板延迟三色动态指示**：
+   - 用户诉求：让 Proxy Protect 面板中的延迟分为绿、黄、红三种颜色去显示，方便用户一眼识别当前代理节点的网络质量优劣。
+2. **后台静默周期复检间隔默认调整**：
+   - 用户诉求：后台静默周期复检间隔默认设置由 10 分钟调整为 30 分钟，降低后台静默轮询频次，节能省电。
+
+#### 2. 技术实现细节
+- **面板延迟三色动态分级 (popup/App.tsx)**：
+  - 在 `ProfileRow` 中渲染的延迟标签引入智能分级算法：
+    - `< 250ms`：呈现绿色 `var(--ok)`，并赋予 `rgba(34, 197, 94, 0.15)` 微透明高品质底衬；
+    - `250ms ~ 800ms`：呈现黄色/橙色 `var(--warn)`，并赋予 `rgba(245, 158, 11, 0.18)` 微透明底衬；
+    - `>= 800ms`：呈现红色 `var(--danger)`，并赋予 `rgba(239, 68, 68, 0.18)` 微透明底衬。
+  - 配合国旗紧随展示，极大增强了不同网络时延节点的视觉辨识度。
+- **默认周期复检间隔更新 (constants.ts)**：
+  - 在 `src/shared/constants.ts` 中将 `DEFAULT_SETTINGS.recheckMinutes` 从 `10` 更新为 `30`。
+  - 扩展新安装或重置配置时默认以 30 分钟为周期调度 `chrome.alarms` 执行静默校验。
+
+#### 3. 验证与回归测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，全项目 **0 错误、0 警告**。
+- **生产构建打包 (Vite)**：执行 `npm run build`，成功编译输出最新扩展资源至 `dist/`，耗时 571ms。
+
+---
+
+### [2026-09-07] 版本自增迭代规范确立与项目版本跃升至 v3.1.6
+
+#### 1. 需求背景与功能目标
+- **版本号迭代规范确立**：用户明确后续每次功能优化迭代均按 Semantic Versioning 规则递增 `0.0.1` 个版本号（patch 位自增）。
+- **当前版本跃升**：在上一版本 `3.1.5` 基础上追加递增一次版本号，正式跃升至 `v3.1.6`。
+
+#### 2. 技术实现细节
+- **全链路版本配置同步更新**：
+  - `public/manifest.json`：`"version": "3.1.6"`
+  - `package.json`：`"version": "3.1.6"`
+  - `package-lock.json`：`"version": "3.1.6"`
+- **动态版本读取**：Popup 弹窗与 Options 控制台顶部均通过 `chrome.runtime.getManifest().version` 实时读取，界面无缝展示 `v3.1.6`。
+
+#### 3. 验证与回归测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，全项目 **0 错误、0 警告**。
+- **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项核心测试 **100% 通过**。
+- **生产构建打包 (Vite)**：执行 `npm run build`，成功编译输出全部生产资源至 `dist/`，耗时 562ms。
+
+---
+
+### [2026-09-07] 删除代理按钮悬浮变白 Bug 根治、当前网站一键加护集成可选账号备注与版本跃升至 v3.1.7
+
+#### 1. 需求背景与功能目标
+1. **删除代理按钮悬浮变白 Bug 修复**：
+   - **Bug 现象**：在代理档案列表或表单中，鼠标悬浮至「删除」危险按钮（`.btn-danger`）时，按钮整体底色意外变成白色，导致白底白字无法辨识。
+   - **根因分析**：`src/styles/base.css` 中通用 `.btn:hover` 预设了 `background: var(--bg-card-hover);`（浅色模式下取值为接近纯白的 `#f8fafc`）。原 `.btn-danger:hover` 仅声明了 `color: #ffffff; box-shadow: ...`，未对 `background` 进行显式定义或渐变重载。在 CSS 优先级与层叠规则下，`.btn:hover` 的白底覆盖了危险红底色，导致悬浮时按钮“整体变白”。
+2. **当前网站一键加护集成可选账号备注表单**：
+   - **用户诉求**：在 Popup 小面板的「当前网站一键加护」卡片中，允许用户一次性录入完整的守护规则与账号备忘（支持邮箱、账号别名、防封备忘说明），但保持表单为**可选填写**，不强迫填写且不破坏小面板的紧凑布局。
+3. **版本自增迭代**：
+   - 遵循此前确立的递增规则，版本号自增 `0.0.1`，由 `v3.1.6` 升级为 `v3.1.7`。
+
+#### 2. 技术实现细节
+- **删除按钮悬浮态样式加固 (src/styles/base.css)**：
+  - 在 `.btn-danger:hover` 中显式指定危险红高光渐变：`background: linear-gradient(135deg, #ef4444 0%, #991b1b 100%)`，并重置 `border-color: transparent` 与深红光晕投影 `box-shadow: 0 4px 14px var(--danger-glow)`。
+  - 同步补充 `.btn-danger:active` 点击下压深色态 `background: #991b1b`，彻底消除鼠标交互时的变白现象。
+- **一键加护卡片轻量折叠备忘表单 (src/pages/popup/App.tsx & popup.css)**：
+  - **折叠胶囊入口**：在当前保护粒度选择器下方新增折叠式触发按钮，默认收起以保持极简尺寸；折叠胶囊根据填写状态智能展示「＋ 填写账号备注备忘 (可选)」或「已填写账号备注 (点击修改)」。
+  - **三合一紧凑表单**：
+    - 第一行双栏网格：登录邮箱/账号（`noteEmail`）+ 账号别名/标识（`noteAlias`）；
+    - 第二行通栏：附加备忘说明/防封注意事项（`noteText`）；
+    - 统一样式：支持聚焦发光、暗色适配与微小圆角，并标明「可选 · 仅存本机」，安全私密。
+  - **一次性保存逻辑 (handleAddGuard)**：
+    - 组装 `ProtectedSite.note` 结构体，将别名、邮箱、用户备忘与自动生成的加护时间及当前代理信息合并，一次性写入 `chrome.storage.local`。
+  - **已加护状态反显**：
+    - 当当前域名已受守护且存在备忘时，在加护绿色卡片中动态展示绑定的别名、脱敏账号与备忘摘要。
+- **全项目版本跃升至 v3.1.7**：
+  - `public/manifest.json`：`"version": "3.1.7"`
+  - `package.json`：`"version": "3.1.7"`
+  - `package-lock.json`：`"version": "3.1.7"`
+
+#### 3. 验证与回归测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，全项目 **0 错误、0 警告**。
+- **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项核心测试 **100% 通过**。
+- **生产构建打包 (Vite)**：执行 `npm run build`，成功耗时 596ms 编译生成 `dist/`，全部资源顺利更新。
+
+
+
+
+
+
+
+
+
+
 
 

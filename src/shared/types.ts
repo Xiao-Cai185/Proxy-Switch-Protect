@@ -8,6 +8,12 @@ export interface ProfileCheckResult {
   city?: string;
   isp?: string;
   checkedAt: number;
+  /** 探测往返延迟（毫秒） */
+  rttMs?: number;
+  /** 是否存在内外分流（非全局代理，境内外流量出口不一致） */
+  isSplitTunnel?: boolean;
+  /** 境内探针返回的 IP */
+  domesticIp?: string;
 }
 
 /** 用户配置的代理档案 */
@@ -112,6 +118,12 @@ export interface ExitIpResult {
   checkedAt: number;
   /** 检测时的代理档案指纹，换代理后结果即失效 */
   profileId: string;
+  /** 探测往返延迟（毫秒） */
+  rttMs?: number;
+  /** 是否存在内外分流（非全局代理，境内外流量出口不一致） */
+  isSplitTunnel?: boolean;
+  /** 境内探针返回的 IP */
+  domesticIp?: string;
 }
 
 export type CheckStatus = 'idle' | 'checking' | 'ok' | 'error';
@@ -144,6 +156,8 @@ export type HabitStore = Record<string, Record<string, string[]>>;
 export interface Suggestion {
   domain: string;
   countryCode: string;
+  /** 采样记录时的出口 IP */
+  sampleIp?: string;
   /** 窗口期内的访问天数 */
   days: number;
   createdAt: number;

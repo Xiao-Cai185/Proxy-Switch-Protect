@@ -55,3 +55,22 @@ export function downloadText(filename: string, text: string): void {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
+
+/** 将十六进制 HEX 颜色转换为指定透明度的 RGBA 字符串 */
+export function hexToRgba(hex: string | undefined, alpha = 1): string {
+  if (!hex || typeof hex !== 'string') return `rgba(59, 130, 246, ${alpha})`;
+  let clean = hex.replace('#', '').trim();
+  if (clean.length === 3) {
+    clean = clean
+      .split('')
+      .map((c) => c + c)
+      .join('');
+  }
+  if (clean.length !== 6) return `rgba(59, 130, 246, ${alpha})`;
+  const num = parseInt(clean, 16);
+  if (Number.isNaN(num)) return `rgba(59, 130, 246, ${alpha})`;
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}

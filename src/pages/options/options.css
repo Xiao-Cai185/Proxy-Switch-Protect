@@ -256,6 +256,35 @@
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.25);
 }
 
+.color-swatch-custom {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--border-card);
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.color-swatch-custom:hover {
+  transform: scale(1.1);
+}
+
+.custom-color-hex {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
 /* 国家多选器 (Country Select) */
 .country-select {
   display: flex;

@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sliders,
+  Sparkles,
   Unlock,
 } from 'lucide-react';
 import { DEFAULT_BYPASS_MINUTES } from '../../shared/constants';
@@ -20,8 +21,16 @@ import { countryName } from '../../shared/countries';
 import { primaryMatchIp } from '../../shared/dual-stack';
 import { ipInCidr } from '../../shared/matchers';
 import { sendCmd } from '../../shared/messages';
-import { Flag } from '../ui/components';
-import { useCheckState, useGuardStates, useSettings, useSites } from '../ui/hooks';
+import { Flag, ProfileBadge } from '../ui/components';
+import {
+  useActiveProfileId,
+  useCheckState,
+  useGuardStates,
+  useProfileChecks,
+  useProfiles,
+  useSettings,
+  useSites,
+} from '../ui/hooks';
 import { maskEmail, timeAgo } from '../ui/util';
 
 /**
@@ -53,6 +62,9 @@ export function App() {
   const guardStates = useGuardStates();
   const checkState = useCheckState();
   const settings = useSettings();
+  const profiles = useProfiles() ?? [];
+  const profileChecks = useProfileChecks() ?? {};
+  const activeProfileId = useActiveProfileId();
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,6 +109,45 @@ export function App() {
     setError(null);
     try {
       await sendCmd({ type: 'forceAllow', siteId, minutes: DEFAULT_BYPASS_MINUTES });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  // 检索符合条件的可用代理候选（前提条件：有符合条件的代理才呈现一键自愈）
+  const healingCandidate = useMemo(() => {
+    if (!site) return null;
+    for (const p of profiles) {
+      if (p.id === activeProfileId) continue;
+      const check = p.lastCheck ?? profileChecks[p.id];
+      if (!check || !check.countryCode) continue;
+
+      const countryPass = site.expectedCountries.length > 0
+        ? site.expectedCountries.includes(check.countryCode.toUpperCase())
+        : true;
+      const ipPass = site.expectedIpRanges.length > 0
+        ? site.expectedIpRanges.some((r) => ipInCidr(check.ip, r))
+        : true;
+
+      const isMatch = site.matchMode === 'all'
+        ? countryPass && ipPass
+        : site.expectedCountries.length > 0 && site.expectedIpRanges.length > 0
+          ? countryPass || ipPass
+          : countryPass && ipPass;
+
+      if (isMatch) {
+        return { profile: p, check };
+      }
+    }
+    return null;
+  }, [site, profiles, profileChecks, activeProfileId]);
+
+  const handleHeal = async (targetProfileId: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await sendCmd({ type: 'switchProfile', profileId: targetProfileId });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setBusy(false);
@@ -174,6 +225,15 @@ export function App() {
           desc: `IPv4 (${result.ipv4CountryCode}) 与 IPv6 (${result.ipv6CountryCode}) 国家不一致，存在明显双栈泄漏特征。`,
           badge: '双栈泄漏',
           isDanger: false,
+        });
+      }
+      if (result?.isSplitTunnel) {
+        score += 20;
+        factors.push({
+          title: '非全局代理（内外分流风险）',
+          desc: `检测到代理开启了分流规则：访问国内走直连真实 IP (${result.domesticIp ?? '国内IP'})，访问海外走代理 (${result.ip})，部分请求可能绕过代理导致关联泄露。`,
+          badge: '非全局代理',
+          isDanger: true,
         });
       }
     }
@@ -369,6 +429,74 @@ export function App() {
                 </div>
               </div>
             </div>
+
+            {/* 智能一键修复自愈建议卡片（仅在检测到有符合条件的代理时呈现） */}
+            {healingCandidate && (
+              <div className="blocked-heal-card">
+                <div className="row-between" style={{ flexWrap: 'wrap', gap: '8px' }}>
+                  <div className="row" style={{ gap: '10px' }}>
+                    <div className="heal-icon-badge">
+                      <Sparkles size={18} className="heal-sparkle-icon" />
+                    </div>
+                    <div>
+                      <div className="row" style={{ gap: '6px' }}>
+                        <span className="heal-title">发现符合访问条件的代理节点</span>
+                        <span className="tag tag-ok" style={{ fontSize: '10px' }}>
+                          一键可自愈
+                        </span>
+                      </div>
+                      <div className="muted small" style={{ marginTop: '2px' }}>
+                        切换至该节点可直接通过安全校验并恢复目标网站访问
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    className="btn btn-primary btn-heal"
+                    disabled={busy}
+                    onClick={() => void handleHeal(healingCandidate.profile.id)}
+                    title="立即切换至符合条件的代理节点并自动恢复访问"
+                  >
+                    <Sparkles size={14} />
+                    <span>一键切换并自动访问</span>
+                  </button>
+                </div>
+
+                <div className="heal-target-box row-between">
+                  <div className="row" style={{ gap: '10px' }}>
+                    <ProfileBadge
+                      icon={healingCandidate.profile.icon}
+                      color={healingCandidate.profile.color}
+                      size={24}
+                    />
+                    <div>
+                      <div className="row" style={{ gap: '6px' }}>
+                        <b>{healingCandidate.profile.name}</b>
+                        <span className="tag tag-primary mono" style={{ fontSize: '10px' }}>
+                          {healingCandidate.profile.scheme.toUpperCase()}
+                        </span>
+                        <Flag cc={healingCandidate.check.countryCode} withName size={13} />
+                      </div>
+                      <div className="muted small mono" style={{ marginTop: '2px' }}>
+                        {healingCandidate.check.ip}
+                        {healingCandidate.check.city && ` · ${healingCandidate.check.city}`}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="row" style={{ gap: '6px' }}>
+                    {healingCandidate.check.rttMs && (
+                      <span className="tag tag-ok mono" style={{ fontSize: '10px' }}>
+                        ⚡ {healingCandidate.check.rttMs}ms
+                      </span>
+                    )}
+                    {!healingCandidate.check.isSplitTunnel && (
+                      <span className="tag tag-ok" style={{ fontSize: '10px' }}>
+                        全局代理
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {state?.reason && (
               <div className="banner banner-warn" style={{ marginTop: '12px' }}>

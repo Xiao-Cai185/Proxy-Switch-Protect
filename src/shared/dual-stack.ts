@@ -125,21 +125,38 @@ export function isIpv4(ip: string): boolean {
   return /^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip);
 }
 
+async function fetchDomesticIp(timeoutMs: number): Promise<string | undefined> {
+  const DOMESTIC_ENDPOINTS = ['https://ip.3322.net'];
+  try {
+    const promises = DOMESTIC_ENDPOINTS.map(async (u) => {
+      const txt = await fetchText(u, timeoutMs);
+      const ip = normalizeIp(txt);
+      if (!ip || !isIpv4(ip)) throw new Error('无效国内IP');
+      return ip;
+    });
+    return await Promise.any(promises);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * 双栈落地检测：
- * - 并行竞速拉取高可用 IPv4（icanhazip / ident.me / ipify）与 IPv6
- * - 分别查归属地；地理展示以 IPv4 为准
+ * - 并行竞速拉取高可用 IPv4 与 IPv6，同时测量网络往返延迟 RTT
+ * - 结合境内端点探测（ip.3322.net），智能判定是否存在内外分流（非全局代理）
  * - 两侧国家不一致时 stackMismatch=true
- * - 若双栈独立探针失败，回退到用户配置的检测源（单 IP）并尽可能补齐 IPv4
  */
 export async function runDualStackCheck(
   checkers: CheckerConfig[],
   timeoutMs: number,
 ): Promise<Omit<ExitIpResult, 'checkedAt' | 'profileId'>> {
-  const [ipv4, ipv6] = await Promise.all([
+  const tStart = Date.now();
+  const [ipv4, ipv6, domesticIp] = await Promise.all([
     fetchFirstValidIp(IPV4_ENDPOINTS, timeoutMs, true),
     fetchFirstValidIp(IPV6_ENDPOINTS, timeoutMs, false),
+    fetchDomesticIp(Math.min(2500, timeoutMs)).catch(() => undefined),
   ]);
+  const rttMs = Math.max(1, Date.now() - tStart);
 
   if (ipv4 || ipv6) {
     const [g4, g6] = await Promise.all([
@@ -165,8 +182,17 @@ export async function runDualStackCheck(
         .filter(Boolean)
         .join('+');
 
+      const primaryIp = ipv4 ?? ipv6!;
+      // 若海外探针为非中国大陆节点，而境内探针返回了不同的国内 IP，则标记为非全局分流代理
+      const isSplitTunnel = !!(
+        countryCode !== 'CN' &&
+        domesticIp &&
+        domesticIp !== ipv4 &&
+        domesticIp !== primaryIp
+      );
+
       return {
-        ip: ipv4 ?? ipv6!,
+        ip: primaryIp,
         ipv4,
         ipv6,
         countryCode,
@@ -176,6 +202,9 @@ export async function runDualStackCheck(
         city: primaryGeo?.city,
         isp: primaryGeo?.isp,
         source: sources,
+        rttMs,
+        isSplitTunnel,
+        domesticIp,
       };
     }
   }
@@ -190,8 +219,15 @@ export async function runDualStackCheck(
       if (!v4) {
         v4 = await fetchFirstValidIp(IPV4_ENDPOINTS, Math.min(2000, timeoutMs), true);
       }
+      const primaryIp = v4 ?? out.ip;
+      const isSplitTunnel = !!(
+        out.countryCode !== 'CN' &&
+        domesticIp &&
+        domesticIp !== v4 &&
+        domesticIp !== primaryIp
+      );
       return {
-        ip: v4 ?? out.ip,
+        ip: primaryIp,
         ipv4: v4,
         ipv6: v6,
         countryCode: out.countryCode,
@@ -201,6 +237,9 @@ export async function runDualStackCheck(
         city: out.city,
         isp: out.isp,
         source: out.source,
+        rttMs,
+        isSplitTunnel,
+        domesticIp,
       };
     } catch (e) {
       errors.push(`${cfg.name}: ${e instanceof Error ? e.message : String(e)}`);

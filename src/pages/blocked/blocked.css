@@ -269,6 +269,65 @@
   word-break: break-all;
 }
 
+/* 智能自愈推荐卡片 (Healing Card) */
+.blocked-heal-card {
+  width: 100%;
+  margin-top: 16px;
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(59, 130, 246, 0.06) 100%), var(--bg-card);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  box-shadow: 0 4px 20px -2px rgba(16, 185, 129, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.heal-icon-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--ok-surface);
+  border: 1px solid var(--ok-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ok);
+  flex: none;
+}
+
+.heal-sparkle-icon {
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+
+.heal-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.heal-target-box {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  align-items: center;
+}
+
+.btn-heal {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: none;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.3);
+}
+.btn-heal:hover {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
 /* 操作按钮栏 */
 .blocked-actions-bar {
   display: flex;

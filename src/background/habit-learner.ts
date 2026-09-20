@@ -64,10 +64,10 @@ async function handleNavigation(frameId: number, url: string): Promise<void> {
   const pruned = pruneHabits(habits, today, HABIT_RETENTION_DAYS);
   if (recorded || pruned) await saveHabits(habits);
 
-  await maybeSuggest(domain, settings);
+  await maybeSuggest(domain, settings, cs.result.ip);
 }
 
-async function maybeSuggest(domain: string, settings: Settings): Promise<void> {
+async function maybeSuggest(domain: string, settings: Settings, sampleIp?: string): Promise<void> {
   const sites = await loadSites();
   if (domainCovered(sites, domain)) return;
   const dismissed = await loadDismissed();
@@ -91,6 +91,7 @@ async function maybeSuggest(domain: string, settings: Settings): Promise<void> {
   suggestions.push({
     domain,
     countryCode: res.countryCode,
+    sampleIp,
     days: res.days,
     createdAt: Date.now(),
   });
@@ -112,8 +113,13 @@ async function maybeSuggest(domain: string, settings: Settings): Promise<void> {
   }
 }
 
-/** 接受建议：创建守护规则并移出建议列表 */
-export async function acceptSuggestion(domain: string, countryCode: string): Promise<void> {
+/** 接受建议：创建守护规则并移出建议列表（支持严格模式设定） */
+export async function acceptSuggestion(
+  domain: string,
+  countryCode: string,
+  expectedIpRanges?: string[],
+  matchMode?: 'any' | 'all',
+): Promise<void> {
   const sites = await loadSites();
   if (!domainCovered(sites, domain)) {
     const now = Date.now();
@@ -121,8 +127,8 @@ export async function acceptSuggestion(domain: string, countryCode: string): Pro
       id: crypto.randomUUID(),
       domainPattern: domain,
       expectedCountries: [countryCode],
-      expectedIpRanges: [],
-      matchMode: 'any',
+      expectedIpRanges: expectedIpRanges ?? [],
+      matchMode: matchMode ?? 'any',
       enabled: true,
       createdAt: now,
       updatedAt: now,

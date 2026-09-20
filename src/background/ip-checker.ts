@@ -3,11 +3,18 @@ import { primaryMatchIp, runDualStackCheck } from '../shared/dual-stack';
 import {
   loadActiveProfileId,
   loadProfileChecks,
+  loadProfiles,
   loadSettings,
   saveProfileChecks,
   setCheckState,
 } from '../shared/storage';
 import type { CheckerConfig, CheckState, ProfileCheckResult } from '../shared/types';
+import {
+  applyRawProxyConfig,
+  buildTestPacScript,
+  restoreActiveProxy,
+  setTestingProfile,
+} from './proxy-manager';
 
 /** 未选择档案时的指纹占位 */
 export function activeKeyOf(id: string | null): string {
@@ -69,6 +76,9 @@ async function doCheck(): Promise<CheckState> {
       city: out.city,
       isp: out.isp,
       checkedAt: checkedTime,
+      rttMs: out.rttMs,
+      isSplitTunnel: out.isSplitTunnel,
+      domesticIp: out.domesticIp,
     };
     try {
       const prevMap = await loadProfileChecks();
@@ -94,6 +104,82 @@ async function doCheck(): Promise<CheckState> {
 export async function testChecker(cfg: CheckerConfig) {
   const settings = await loadSettings();
   return runChecker(cfg, settings.timeoutMs);
+}
+
+/** 针对特定代理档案的隔离管线落地检测（不切换当前浏览器代理） */
+export async function testProfileIsolated(profileId: string): Promise<ProfileCheckResult> {
+  const activeId = await loadActiveProfileId();
+  // 若正好是当前激活档案，直接走当前主检测流，确保 checkState 同步更新
+  if (profileId === activeId) {
+    const st = await ensureCheck(true);
+    if (st.status === 'ok' && st.result) {
+      return {
+        countryCode: st.result.countryCode,
+        ip: st.result.ip,
+        city: st.result.city,
+        isp: st.result.isp,
+        checkedAt: st.result.checkedAt,
+        rttMs: st.result.rttMs,
+        isSplitTunnel: st.result.isSplitTunnel,
+        domesticIp: st.result.domesticIp,
+      };
+    }
+    throw new Error(st.error || '检测失败');
+  }
+
+  const profiles = await loadProfiles();
+  const target = profiles.find((p) => p.id === profileId);
+  if (!target) throw new Error('代理档案不存在');
+
+  const settings = await loadSettings();
+  const activeProfile = profiles.find((p) => p.id === activeId) ?? null;
+
+  const customHosts = settings.checkers
+    .map((c) => {
+      try {
+        return new URL(c.url).hostname;
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean);
+
+  const pacScript = buildTestPacScript(target, activeProfile, customHosts);
+
+  setTestingProfile(target);
+  try {
+    await applyRawProxyConfig({
+      mode: 'pac_script',
+      pacScript: { data: pacScript },
+    });
+
+    const out = await runDualStackCheck(settings.checkers, settings.timeoutMs);
+    const checkedTime = Date.now();
+    const checkRes: ProfileCheckResult = {
+      countryCode: out.countryCode,
+      ip: out.ip,
+      city: out.city,
+      isp: out.isp,
+      checkedAt: checkedTime,
+      rttMs: out.rttMs,
+      isSplitTunnel: out.isSplitTunnel,
+      domesticIp: out.domesticIp,
+    };
+
+    // 仅写入 profileChecks 存储，不更新 activeProfileId，不污染当前浏览器的代理
+    try {
+      const prevMap = await loadProfileChecks();
+      prevMap[profileId] = checkRes;
+      await saveProfileChecks(prevMap);
+    } catch {
+      // 忽略持久化异常
+    }
+
+    return checkRes;
+  } finally {
+    setTestingProfile(null);
+    await restoreActiveProxy();
+  }
 }
 
 export { primaryMatchIp };

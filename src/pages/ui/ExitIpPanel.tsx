@@ -5,12 +5,12 @@ import {
   Copy,
   Globe,
   RefreshCw,
+  ShieldAlert,
   WifiOff,
 } from 'lucide-react';
 import { countryName } from '../../shared/countries';
 import type { CheckState, ExitIpResult } from '../../shared/types';
 import { Flag } from './components';
-import { timeAgo } from './util';
 
 /** 落地 IP 状态面板：双栈展示，地理以 V4 为准，V4/V6 国家不一致时告警 */
 export function ExitIpPanel({
@@ -154,10 +154,14 @@ function ExitIpBody({ result }: { result: ExitIpResult }) {
         </div>
       )}
 
-      <div className="row-between muted small exit-meta">
-        <span className="ellipsis">源：{result.source}</span>
-        <span>{timeAgo(result.checkedAt)}</span>
-      </div>
+      {result.isSplitTunnel && (
+        <div className="banner banner-warn" style={{ marginTop: '8px', padding: '6px 10px' }}>
+          <ShieldAlert size={14} style={{ color: 'var(--warn)', flex: 'none' }} />
+          <div className="small">
+            <b>检测到内外分流（非全局代理）</b>：访问国内将直连真实网络，仅国外流量经代理，请警惕国内敏感域名直连泄露风险。
+          </div>
+        </div>
+      )}
     </div>
   );
 }

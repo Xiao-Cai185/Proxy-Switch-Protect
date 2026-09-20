@@ -7,9 +7,16 @@ export type BgCommand =
   | { type: 'forceAllow'; siteId: string; minutes?: number }
   | { type: 'relockAll' }
   | { type: 'pauseGuard'; minutes?: number }
-  | { type: 'acceptSuggestion'; domain: string; countryCode: string }
+  | {
+      type: 'acceptSuggestion';
+      domain: string;
+      countryCode: string;
+      expectedIpRanges?: string[];
+      matchMode?: 'any' | 'all';
+    }
   | { type: 'dismissSuggestion'; domain: string }
   | { type: 'testChecker'; checker: CheckerConfig }
+  | { type: 'testProfile'; profileId: string }
   | { type: 'getLevelOfControl' };
 
 export type BgResponse<T = unknown> =

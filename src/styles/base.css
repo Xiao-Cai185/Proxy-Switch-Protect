@@ -224,8 +224,14 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 2px 8px var(--danger-glow);
 }
 .btn-danger:hover {
+  background: linear-gradient(135deg, #ef4444 0%, #991b1b 100%);
+  border-color: transparent;
   color: #ffffff;
   box-shadow: 0 4px 14px var(--danger-glow);
+}
+.btn-danger:active {
+  background: #991b1b;
+  border-color: transparent;
 }
 
 .btn-ghost {

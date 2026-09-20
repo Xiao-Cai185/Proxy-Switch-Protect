@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Activity,
   BarChart3,
@@ -22,6 +22,8 @@ export function HabitsTab() {
   const habits = useHabits() ?? {};
   const suggestions = useSuggestions() ?? [];
   const settings = useSettings();
+  const [confirmingDomain, setConfirmingDomain] = useState<string | null>(null);
+  const [strictMode, setStrictMode] = useState<'country' | 'subnet'>('country');
 
   const stats: DomainStat[] = useMemo(() => {
     return Object.entries(habits)
@@ -44,6 +46,28 @@ export function HabitsTab() {
     await saveHabits({});
   };
 
+  const handleConfirmAccept = async (s: (typeof suggestions)[number]) => {
+    let expectedIpRanges: string[] = [];
+    let matchMode: 'any' | 'all' = 'any';
+
+    if (strictMode === 'subnet' && s.sampleIp) {
+      const parts = s.sampleIp.split('.');
+      if (parts.length === 4) {
+        expectedIpRanges = [`${parts[0]}.${parts[1]}.${parts[2]}.0/24`];
+        matchMode = 'all';
+      }
+    }
+
+    await sendCmd({
+      type: 'acceptSuggestion',
+      domain: s.domain,
+      countryCode: s.countryCode,
+      expectedIpRanges,
+      matchMode,
+    });
+    setConfirmingDomain(null);
+  };
+
   return (
     <div className="tab-container">
       {/* 智能绑定建议 */}
@@ -58,44 +82,130 @@ export function HabitsTab() {
       </div>
 
       <div className="card o-list" style={{ marginBottom: '20px' }}>
-        {suggestions.map((s) => (
-          <div className="o-row suggestion-item-row" key={s.domain}>
-            <div className="grow">
-              <div className="row" style={{ gap: '8px' }}>
-                <b className="mono" style={{ fontSize: '14px' }}>{s.domain}</b>
-                <span className="tag tag-primary">建议绑定</span>
+        {suggestions.map((s) => {
+          const isConfirming = confirmingDomain === s.domain;
+          const subnetStr = s.sampleIp ? `${s.sampleIp.split('.').slice(0, 3).join('.')}.0/24` : null;
+
+          return (
+            <div
+              className={`o-row suggestion-item-row ${isConfirming ? 'o-row-active' : ''}`}
+              key={s.domain}
+              style={{ flexDirection: 'column', alignItems: 'stretch', gap: '8px' }}
+            >
+              <div className="row-between" style={{ width: '100%' }}>
+                <div className="grow">
+                  <div className="row" style={{ gap: '8px' }}>
+                    <b className="mono" style={{ fontSize: '14px' }}>{s.domain}</b>
+                    <span className="tag tag-primary">建议绑定</span>
+                    {s.sampleIp && (
+                      <span className="tag mono muted small" style={{ fontSize: '10.5px' }}>
+                        采样 IP: {s.sampleIp}
+                      </span>
+                    )}
+                  </div>
+                  <div className="small muted row" style={{ gap: '6px', marginTop: '3px' }}>
+                    <span>最近 {s.days} 天习惯固定使用</span>
+                    <Flag cc={s.countryCode} withName size={14} />
+                    <span>出口访问 · {timeAgo(s.createdAt)}</span>
+                  </div>
+                </div>
+                <div className="row" style={{ gap: '6px' }}>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    onClick={() =>
+                      void sendCmd({ type: 'dismissSuggestion', domain: s.domain })
+                    }
+                  >
+                    忽略
+                  </button>
+                  <button
+                    className={`btn btn-sm ${isConfirming ? 'btn-ghost' : 'btn-primary'}`}
+                    onClick={() => {
+                      if (isConfirming) setConfirmingDomain(null);
+                      else {
+                        setConfirmingDomain(s.domain);
+                        setStrictMode('country');
+                      }
+                    }}
+                  >
+                    <Check size={13} />
+                    <span>{isConfirming ? '收起配置' : '确认录入规则…'}</span>
+                  </button>
+                </div>
               </div>
-              <div className="small muted row" style={{ gap: '6px', marginTop: '3px' }}>
-                <span>最近 {s.days} 天习惯固定使用</span>
-                <Flag cc={s.countryCode} withName size={14} />
-                <span>出口访问 · {timeAgo(s.createdAt)}</span>
-              </div>
+
+              {/* 录入规则严格程度确认面板 */}
+              {isConfirming && (
+                <div
+                  className="card"
+                  style={{
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    padding: '12px 14px',
+                    marginTop: '6px',
+                  }}
+                >
+                  <div className="small" style={{ fontWeight: 600, marginBottom: '8px' }}>
+                    选择该站点守护规则的严格程度（防封号策略）：
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label className="row" style={{ gap: '8px', cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name={`strict-${s.domain}`}
+                        checked={strictMode === 'country'}
+                        onChange={() => setStrictMode('country')}
+                      />
+                      <div>
+                        <div className="small" style={{ fontWeight: 600 }}>
+                          🟢 国家地区守护（标准推荐 · 适合动态节点池）
+                        </div>
+                        <div className="muted small">
+                          只要代理出口位于 <Flag cc={s.countryCode} withName size={12} /> 即允许访问，适合常用动态家宽/动态节点。
+                        </div>
+                      </div>
+                    </label>
+
+                    {subnetStr && (
+                      <label className="row" style={{ gap: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name={`strict-${s.domain}`}
+                          checked={strictMode === 'subnet'}
+                          onChange={() => setStrictMode('subnet')}
+                        />
+                        <div>
+                          <div className="small" style={{ fontWeight: 600 }}>
+                            🛡️ 严苛双重锁定（国家 + 网段 {subnetStr} · 适合固定专线养号）
+                          </div>
+                          <div className="muted small">
+                            必须同时满足所属国家且出口位于该 C 段网段，防范节点发生意外漂移。
+                          </div>
+                        </div>
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="row" style={{ gap: '8px', marginTop: '12px', justifyContent: 'flex-end' }}>
+                    <button
+                      className="btn btn-sm btn-ghost"
+                      onClick={() => setConfirmingDomain(null)}
+                    >
+                      取消
+                    </button>
+                    <button
+                      className="btn btn-sm btn-primary"
+                      onClick={() => void handleConfirmAccept(s)}
+                    >
+                      <Check size={13} />
+                      <span>确认建立守护规则</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            <div className="row" style={{ gap: '6px' }}>
-              <button
-                className="btn btn-sm btn-ghost"
-                onClick={() =>
-                  void sendCmd({ type: 'dismissSuggestion', domain: s.domain })
-                }
-              >
-                忽略
-              </button>
-              <button
-                className="btn btn-sm btn-primary"
-                onClick={() =>
-                  void sendCmd({
-                    type: 'acceptSuggestion',
-                    domain: s.domain,
-                    countryCode: s.countryCode,
-                  })
-                }
-              >
-                <Check size={13} />
-                <span>立即建立守护</span>
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
         {suggestions.length === 0 && (
           <Empty
             text={
