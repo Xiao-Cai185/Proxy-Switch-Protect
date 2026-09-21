@@ -370,6 +370,24 @@ export function SettingsTab() {
               每次打开守护网站都会执行强制验证，此周期值用于定期防范静默断网漂移。
             </span>
           </label>
+          <label className="field full">
+            <span className="field-label">安全检测通过后自动返回原网站延迟（秒，默认 3 秒）</span>
+            <input
+              type="number"
+              min={1}
+              max={30}
+              step={1}
+              value={settings.passRedirectDelaySec ?? 3}
+              onChange={(e) =>
+                patch({
+                  passRedirectDelaySec: Math.max(1, Math.min(30, Number(inputValue(e)) || 3)),
+                })
+              }
+            />
+            <span className="field-hint">
+              安全核验通过后，落地页展示放行结果并等待自动返回目标网站的倒计时时长（支持 1 ~ 30 秒，默认 3 秒）。给程序与网络连接留出充足的确认时间。
+            </span>
+          </label>
         </div>
       </div>
 

@@ -19,6 +19,7 @@ export interface DnrRuleJson {
     regexFilter?: string;
     requestDomains?: string[];
     resourceTypes: string[];
+    excludedTabIds?: number[];
   };
 }
 
@@ -44,13 +45,27 @@ export const SUB_RESOURCE_TYPES = [
  * 生成某站点处于锁定态时的两条 DNR 规则。
  * @param blockedBaseUrl 拦截页完整 URL（chrome.runtime.getURL('blocked.html')）
  * @param ids [重定向规则id, 阻断规则id]
+ * @param excludedTabIds 排除匹配的放行标签页 ID 列表（Chromium Session 规则专用）
  */
 export function buildSiteRules(
   siteId: string,
   domain: string,
   ids: [number, number],
   blockedBaseUrl: string,
+  excludedTabIds?: number[],
 ): DnrRuleJson[] {
+  // Chrome DNR requestDomains 原生支持域名及其全部子域名匹配，但要求传纯域名（不得带 * 或前导点）
+  const dnrDomain = domain.replace(/^\*\./, '').replace(/^\./, '').replace(/\.$/, '').toLowerCase();
+  const condBase: {
+    requestDomains: string[];
+    excludedTabIds?: number[];
+  } = {
+    requestDomains: [dnrDomain],
+  };
+  if (excludedTabIds && excludedTabIds.length > 0) {
+    condBase.excludedTabIds = excludedTabIds;
+  }
+
   return [
     {
       id: ids[0],
@@ -63,8 +78,8 @@ export function buildSiteRules(
         },
       },
       condition: {
+        ...condBase,
         regexFilter: '^https?://.*',
-        requestDomains: [domain],
         resourceTypes: ['main_frame'],
       },
     },
@@ -73,7 +88,7 @@ export function buildSiteRules(
       priority: 1,
       action: { type: 'block' },
       condition: {
-        requestDomains: [domain],
+        ...condBase,
         resourceTypes: SUB_RESOURCE_TYPES,
       },
     },

@@ -20,7 +20,7 @@ import { DEFAULT_BYPASS_MINUTES } from '../../shared/constants';
 import { countryName } from '../../shared/countries';
 import { primaryMatchIp } from '../../shared/dual-stack';
 import { ipInCidr } from '../../shared/matchers';
-import { sendCmd } from '../../shared/messages';
+import { sendCmd, type VerifyTabResult } from '../../shared/messages';
 import { Flag, ProfileBadge } from '../ui/components';
 import {
   useActiveProfileId,
@@ -70,20 +70,84 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [showEmail, setShowEmail] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
+  const [validating, setValidating] = useState(true);
+
+  const targetDelaySec = Math.max(1, settings?.passRedirectDelaySec ?? 3);
+  const [countdown, setCountdown] = useState<number>(3);
 
   const site = (sites ?? []).find((s) => s.id === siteId);
   const state = guardStates?.[siteId];
   const result = checkState?.status === 'ok' ? checkState.result : undefined;
   const webrtcOn = settings?.webrtcProtect !== false;
 
-  // 守护恢复（放行 / 临时放行）后自动跳回原页面
+  // 页面加载首屏即刻安全核验当前新建标签页
   useEffect(() => {
-    if (!from || redirecting) return;
-    if (state?.status === 'allowed' || state?.status === 'bypass') {
-      setRedirecting(true);
-      setTimeout(() => location.replace(from), 500);
+    if (!siteId || !from) {
+      setValidating(false);
+      return;
     }
-  }, [state?.status, from, redirecting]);
+
+    let isMounted = true;
+    void (async () => {
+      try {
+        const tab = await chrome.tabs.getCurrent();
+        const tabId = tab?.id;
+        if (typeof tabId === 'number' && tabId > 0) {
+          const res = await sendCmd<VerifyTabResult>({
+            type: 'verifyAndAllowTab',
+            siteId,
+            tabId,
+          });
+          if (!isMounted) return;
+          if (res.pass) {
+            setCountdown(targetDelaySec);
+            setRedirecting(true);
+            return;
+          }
+        }
+      } catch {
+        // 忽略异常，平滑展示拦截 UI
+      } finally {
+        if (isMounted) setValidating(false);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [siteId, from, targetDelaySec]);
+
+  // 守护恢复（首屏核验完成之后，因用户自愈/手动重检/临时放行状态恢复）后自动加入白名单并跳回原页面
+  useEffect(() => {
+    if (!from || redirecting || validating) return;
+    if (state?.status === 'allowed' || state?.status === 'bypass') {
+      setCountdown(targetDelaySec);
+      setRedirecting(true);
+      void (async () => {
+        try {
+          const tab = await chrome.tabs.getCurrent();
+          if (tab?.id) {
+            await sendCmd({ type: 'verifyAndAllowTab', siteId, tabId: tab.id });
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    }
+  }, [state?.status, from, redirecting, validating, siteId, targetDelaySec]);
+
+  // 倒计时管理器：当 redirecting 为 true 时每秒递减，归零时执行替换跳转
+  useEffect(() => {
+    if (!redirecting || !from) return;
+    if (countdown <= 0) {
+      location.replace(from);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setCountdown((c) => c - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [redirecting, countdown, from]);
 
   const recheck = async () => {
     setBusy(true);
@@ -168,6 +232,28 @@ export function App() {
       ? site.expectedIpRanges.some((r) => ipInCidr(matchIp, r))
       : true;
     const isError = checkState?.status === 'error' || (!result && checkState?.status !== 'checking');
+
+    // 判定是否属于放行通过状态
+    const isExplicitAllowed = redirecting || state?.status === 'allowed' || state?.status === 'bypass';
+    const isEnvCompliant = !isError && countryMatched && ipMatched && webrtcOn && !result?.stackMismatch && (hasCountry || hasIp);
+
+    if (isExplicitAllowed || isEnvCompliant) {
+      return {
+        score: 100,
+        level: 'safe' as const,
+        levelText: '安全合规 · 准予通行',
+        mismatchPill: '安全通过',
+        isSafe: true,
+        factors: [
+          {
+            title: '网络落地环境匹配',
+            desc: `当前探测实际落地为 [${result?.countryCode ?? ''}]（${countryName(result?.countryCode ?? '')}），完全符合站点配置的安全放行策略。`,
+            badge: '环境匹配',
+            isDanger: false,
+          },
+        ],
+      };
+    }
 
     const factors: { title: string; desc: string; badge: string; isDanger: boolean }[] = [];
     let score = 40;
@@ -264,9 +350,10 @@ export function App() {
       level,
       levelText,
       mismatchPill,
+      isSafe: false,
       factors,
     };
-  }, [site, result, checkState?.status, webrtcOn]);
+  }, [site, result, checkState?.status, webrtcOn, redirecting, state?.status]);
 
   return (
     <div className="blocked-layout">
@@ -281,10 +368,45 @@ export function App() {
         </div>
 
         <h1 className="blocked-title">
-          {redirecting ? '安全校验通过，正在自动返回…' : '访问请求已被 Proxy Protect 安全阻断'}
+          {redirecting
+            ? `安全校验通过，${countdown > 0 ? `${countdown} 秒后` : ''}自动返回…`
+            : validating
+              ? '正在安全核验当前标签页网络环境…'
+              : '访问请求已被 Proxy Protect 安全阻断'}
         </h1>
 
-        {!site && (
+        {redirecting && (
+          <div className="row center" style={{ gap: '10px', margin: '4px 0 14px', color: 'var(--ok)' }}>
+            <span className="spinner" style={{ width: '15px', height: '15px', borderWidth: '2px', borderColor: 'var(--ok)', borderTopColor: 'transparent', display: 'inline-block' }} />
+            <span className="small" style={{ fontWeight: 600 }}>底层放行白名单与网络规则已确认，即将进入…</span>
+            <button
+              className="btn btn-sm"
+              style={{
+                padding: '2px 10px',
+                fontSize: '11px',
+                background: 'var(--ok-surface)',
+                color: 'var(--ok)',
+                borderColor: 'var(--ok)',
+                borderRadius: 'var(--radius-full)',
+              }}
+              onClick={() => location.replace(from)}
+              title="不等待倒计时，立即跳回目标网站"
+            >
+              立即跳回
+            </button>
+          </div>
+        )}
+
+        {validating && !redirecting && (
+          <div className="center" style={{ margin: '24px 0', textAlign: 'center' }}>
+            <span className="spinner" style={{ width: '26px', height: '26px', display: 'inline-block' }} />
+            <div className="muted small" style={{ marginTop: '10px' }}>
+              正在确认代理落地国家与 WebRTC 安全状态，请稍候…
+            </div>
+          </div>
+        )}
+
+        {!validating && !site && (
           <div className="banner banner-warn" style={{ marginTop: '12px' }}>
             <AlertTriangle size={16} />
             <span className="small">
@@ -293,12 +415,19 @@ export function App() {
           </div>
         )}
 
-        {site && (
+        {!validating && site && (
           <>
-            <p className="blocked-desc">
-              目标站点 <b className="mono blocked-domain-tag">{site.domainPattern}</b>{' '}
-              已配置严格的地区守护。当前实际网络状态未满足放行要求，为防范账号触发异地风控或公网 IP 泄露，已在网络层强制拦截。
-            </p>
+            {redirecting || risk?.level === 'safe' ? (
+              <p className="blocked-desc blocked-desc-success">
+                目标站点 <b className="mono blocked-domain-tag">{site.domainPattern}</b> 地区守护核验通过。
+                当前实际落地网络环境与期望完全一致，安全校验达标，正在自动返回目标网站…
+              </p>
+            ) : (
+              <p className="blocked-desc">
+                目标站点 <b className="mono blocked-domain-tag">{site.domainPattern}</b>{' '}
+                已配置严格的地区守护。当前实际网络状态未满足放行要求，为防范账号触发异地风控或公网 IP 泄露，已在网络层强制拦截。
+              </p>
+            )}
 
             {/* 综合风险评分仪表盘卡片 */}
             {risk && (
@@ -311,15 +440,29 @@ export function App() {
                     </div>
                     <div>
                       <div className="row" style={{ gap: '6px' }}>
-                        <Flame size={14} className="risk-fire-icon" />
+                        {risk.level === 'safe' ? (
+                          <ShieldCheck size={15} className="risk-shield-icon" />
+                        ) : (
+                          <Flame size={14} className="risk-fire-icon" />
+                        )}
                         <span className="risk-level-title">{risk.levelText}</span>
                       </div>
                       <div className="muted small" style={{ marginTop: '2px' }}>
-                        系统检测到 {risk.factors.length} 项触发安全阻断的危险风险因子
+                        {risk.level === 'safe'
+                          ? '系统检测到 0 项安全风险因子，当前网络完全满足放行策略'
+                          : `系统检测到 ${risk.factors.length} 项触发安全阻断的危险风险因子`}
                       </div>
                     </div>
                   </div>
-                  <span className={`tag tag-${risk.level === 'critical' ? 'danger' : 'warn'}`}>
+                  <span
+                    className={`tag ${
+                      risk.level === 'safe'
+                        ? 'tag-ok'
+                        : risk.level === 'critical'
+                          ? 'tag-danger'
+                          : 'tag-warn'
+                    }`}
+                  >
                     {risk.mismatchPill}
                   </span>
                 </div>
@@ -329,7 +472,7 @@ export function App() {
                     <div className="risk-factor-item" key={i}>
                       <div className="row" style={{ gap: '6px', marginBottom: '2px' }}>
                         <span
-                          className={`tag ${f.isDanger ? 'tag-danger' : 'tag-warn'}`}
+                          className={`tag ${f.isDanger ? 'tag-danger' : risk.level === 'safe' ? 'tag-ok' : 'tag-warn'}`}
                           style={{ fontSize: '10px' }}
                         >
                           {f.badge}
@@ -367,7 +510,7 @@ export function App() {
                         <div className="compare-country-name">
                           {countryName(result.countryCode)}
                           <span
-                            className="tag tag-warn mono"
+                            className={`tag ${risk?.level === 'safe' ? 'tag-ok' : 'tag-warn'} mono`}
                             style={{ marginLeft: '6px', fontSize: '10px' }}
                           >
                             {result.countryCode.toUpperCase()}
@@ -396,11 +539,11 @@ export function App() {
 
               {/* 中间对比箭头 */}
               <div className="compare-divider">
-                <div className="compare-divider-icon">
-                  <ArrowRight size={18} />
+                <div className={`compare-divider-icon ${risk?.level === 'safe' ? 'success' : ''}`}>
+                  {risk?.level === 'safe' ? <ShieldCheck size={18} /> : <ArrowRight size={18} />}
                 </div>
-                <span className="compare-mismatch-pill">
-                  {risk?.mismatchPill ?? '安全阻断'}
+                <span className={risk?.level === 'safe' ? 'compare-match-pill' : 'compare-mismatch-pill'}>
+                  {risk?.level === 'safe' ? '环境匹配' : (risk?.mismatchPill ?? '安全阻断')}
                 </span>
               </div>
 

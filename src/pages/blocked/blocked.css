@@ -107,6 +107,12 @@
   background: linear-gradient(180deg, rgba(59, 130, 246, 0.06) 0%, var(--bg-card) 100%);
 }
 
+.blocked-risk-card.risk-safe {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: linear-gradient(180deg, rgba(16, 185, 129, 0.08) 0%, var(--bg-card) 100%);
+  box-shadow: 0 4px 20px -2px rgba(16, 185, 129, 0.15);
+}
+
 .risk-header {
   align-items: center;
 }
@@ -138,6 +144,10 @@
   color: var(--primary);
 }
 
+.risk-safe .risk-score-num {
+  color: var(--ok);
+}
+
 .risk-score-max {
   font-size: 11px;
   color: var(--text-muted);
@@ -146,6 +156,10 @@
 
 .risk-fire-icon {
   color: var(--danger);
+}
+
+.risk-shield-icon {
+  color: var(--ok);
 }
 
 .risk-high .risk-fire-icon {
@@ -225,11 +239,27 @@
   color: var(--text-muted);
 }
 
+.compare-divider-icon.success {
+  color: var(--ok);
+  border-color: rgba(16, 185, 129, 0.4);
+  background: var(--ok-surface);
+}
+
 .compare-mismatch-pill {
   font-size: 10px;
   font-weight: 700;
   color: var(--warn);
   background: var(--warn-surface);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.compare-match-pill {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ok);
+  background: var(--ok-surface);
   padding: 1px 6px;
   border-radius: var(--radius-full);
   white-space: nowrap;

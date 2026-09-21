@@ -102,6 +102,11 @@ export interface Settings {
   webrtcProtect: boolean;
   /** 全局流量判定校验策略等级 */
   trafficValidationLevel?: TrafficValidationLevel;
+  /**
+   * 安全检测通过后，落地页自动返回目标网站的等待延迟时长（秒）。
+   * 默认 3 秒。
+   */
+  passRedirectDelaySec?: number;
   /** 是否启用使用习惯统计 */
   habitEnabled: boolean;
   /** 是否弹出绑定建议通知 */

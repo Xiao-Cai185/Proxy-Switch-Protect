@@ -573,6 +573,207 @@ Popup 弹窗右上角已具备直观的齿轮设置图标按钮（`<SettingsIcon
 - **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、45 项核心测试 **100% 通过**。
 - **生产构建打包 (Vite)**：执行 `npm run build`，耗时 817ms 顺利编译输出 `dist/`，全部前端页面与 Service Worker 均无异常。
 
+---
+
+### [2026-09-21] 新建标签页拦截优化与零数据包泄露（DNR Session Rules excludedTabIds 架构演进）与版本跃升至 v3.1.9
+
+#### 1. 需求背景与根因排查
+- **问题现象**：
+  用户（彩彩）在测试中反馈：新建标签页访问受保护敏感站点时，仍然会放走数据包，页面在屏幕上先加载出来随后才被拦截，违背了 Fail-Closed 防护初衷。用户强调：“首屏是指新建标签页，优化这里的拦截逻辑，并不是浏览器打开的首屏”。
+- **深度底层根因排查**：
+  1. **Chromium MV3 `onBeforeNavigate` 异步非阻塞**：当用户新建标签页输入网址并回车时，Chromium C++ 网络底层已同步发起 DNS 解析、TCP/TLS 握手并发出 HTTP GET 主文档请求。`chrome.webNavigation.onBeforeNavigate` 仅为只读广播通知，无法拦截正在发出的网络包。
+  2. **原架构在站点放行时直接清空了底层 DNR 规则**：此前当某个站点处于 `allowed` 状态时，`guard-engine.ts` 中的 `_setAll` 会将该站点的 `declarativeNetRequest` 规则全盘移除。因此当用户新建标签页访问该域名时，Chromium 网络底层没有任何规则拦截，数据包直通目标服务器并渲染出页面。
+  3. **动态规则对正在传输的请求无追溯取消能力**：随后后台 SW 虽尝试重新置为 `checking` 并补发动态规则，但 Chromium 规范限制动态规则对已发起的请求不生效，导致页面先加载出来、数秒后探测完成或触发子路由才被拦截，造成严重的异地 IP 数据包泄露风险。
+
+#### 2. 技术方案与底层架构演进（DNR Session Rules 常驻 + `excludedTabIds` 放行白名单）
+升级利用 Chromium 92+ 官方原生支持的 `chrome.declarativeNetRequest.updateSessionRules` 与 `RuleCondition.excludedTabIds`，从根本上解决网络层泄露问题：
+
+1. **底层物理级常驻拦截（Fail-Closed 0 字节泄露）**：
+   - 所有启用的受保护站点，其主框架重定向规则（导向 `blocked.html`）与子资源阻断规则在 Chromium 网络层**底层常驻生效**；
+   - 规则的 `condition` 中注入 `excludedTabIds?: number[]` 放行白名单；
+   - **未验证的新标签页**：由于其 `tabId` 默认不在 `excludedTabIds` 中，Chromium C++ 网络层在发出任何 TCP SYN 或 TLS 握手前，**强制同步将请求重定向至 `blocked.html`，0 数据包抵达目标服务器，绝不可能先加载出网页**。
+2. **已放行标签页满血直通（兼顾极致流畅体验）**：
+   - 凡已通过开屏验证的标签页，其 `tabId` 记录于 `excludedTabIds` 中。Chromium 网络层对该标签页的所有页面内交互、子资源加载、单页应用 SPA 路由切换 100% 满速直连，不走任何 DNR 拦截，零延迟不卡顿。
+3. **拦截页与后台极速安全核验联动 (`verifyAndAuthorizeTab`)**：
+   - 当新标签页首次访问受保护站点被截流至 `blocked.html` 时，页面挂载瞬间获取当前 `tabId` 并向后台发送 `verifyAndAllowTab`：
+     - **宽松模式 (Level 3) / 抽样模式 (Level 2)**：后台优先比对内存中当前代理出口的新鲜合规状态。若当前落地地区与 IP 满足站点期望，立即将该 `tabId` 写入白名单并刷新 Session 规则，前端以毫秒级微动效执行 `location.replace(from)` 瞬间切入目标网站，用户无感且 0 数据包泄露；
+     - **严格模式 (Level 1)**：每次新建标签页强制执行多源实时探测 `ensureCheck(true)`，探测通过后放行；
+     - **异地违规 / 代理断流**：停留在 `blocked.html`，展示综合风险评分、差异对比看板与一键代理自愈，目标网站全程未发送任何数据包。
+4. **生命周期与安全闭环管理**：
+   - 切换代理节点（`switchProfile`）、规则变更（`onSitesChanged`）或用户手动锁定（`relockAll`）时：一键清空所有放行白名单，全浏览器所有标签页瞬间重回底层封锁；
+   - 标签页关闭（`tabs.onRemoved`）时自动清理对应会话，防止内存泄露。
+
+#### 3. 修改的文件与技术细节
+- **`src/shared/rules.ts`**：
+  - `DnrRuleJson['condition']` 扩充 `excludedTabIds?: number[]`；
+  - `buildSiteRules` 改造为支持传递 `excludedTabIds`，主框架重定向规则与子资源阻断规则同步注入标签页白名单。
+- **`src/background/traffic-policy.ts`**：
+  - `TabSession` 重构支持多站点白名单映射结构 `verifiedSites: Record<string, number>`；
+  - 导出 `getExcludedTabIdsForSite(siteId)` 查询接口供 DNR 规则实时读取；
+  - 完善 `markTabVerified`、`recordTabRequest`、`clearAllTabSessions` 与标签页移除监听。
+- **`src/background/guard-engine.ts`**：
+  - 将原 `updateDynamicRules` 全面升级为 `dnrUpdateSessionRules` 与 `dnrGetSessionRules`，并提供 `dnrClearLegacyDynamicRules` 清理历史动态规则；
+  - `_setAll` 重构为常驻规则结构，站点 `allowed` 时自动提取并填入 `excludedTabIds`；
+  - 实现并导出 `syncDnrRules()` 规则白名单极速同步机制；
+  - 实现并导出核心核验逻辑 `verifyAndAuthorizeTab(siteId, tabId)`。
+- **`src/shared/messages.ts`**：
+  - `BgCommand` 新增 `{ type: 'verifyAndAllowTab'; siteId: string; tabId: number }` 指令定义；
+  - 导出 `VerifyTabResult` 接口。
+- **`src/background/index.ts`**：
+  - `handleCommand` 中注册接入 `verifyAndAllowTab` 消息路由。
+- **`src/pages/blocked/App.tsx`**：
+  - 引入 `validating` 状态，页面加载首屏即刻安全核验当前标签页；
+  - 若通过安全核验，执行毫秒级平滑 `location.replace(from)`，页面绝不先加载，目标网站 0 数据包泄露；
+  - 守护恢复时联动更新白名单并无感跳回；
+  - 优化核验微加载态与阻断风险卡片之间的切换逻辑。
+- **`tests/rules.test.ts`**：
+  - 新增针对 `buildSiteRules` 生成 `excludedTabIds` 字段的单元测试用例。
+- **全项目版本跃升至 v3.1.9**：
+  - `public/manifest.json`：`"version": "3.1.9"`
+  - `package.json`：`"version": "3.1.9"`
+  - `package-lock.json`：`"version": "3.1.9"`
+
+#### 4. 验证与回归测试记录
+- **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、46 项测试（含新增规则白名单测试）**100% 通过**。
+- **静态类型检查 (TypeScript)**：执行 `npm run typecheck`，全链路类型声明严谨无误，**0 错误、0 警告**。
+- **生产构建打包 (Vite)**：执行 `npm run build`，成功耗时 547ms 编译生成 `dist/`，全部资源打包正常。
+
+---
+
+### [2026-09-21] 拦截一闪而过放行竞态修复与开屏实时探测/插件红绿状态同步优化
+
+#### 1. 需求背景与根因排查
+- **问题现象**：
+  用户（彩彩）在测试中反馈：“首屏检测确实有了，但是拦截一闪而过就放行了，经过我的观察，右上角插件当前代理的IP判定没有同步更新，可能造成了这样的写了，逻辑遵循，开屏检测，规则生效，结果同步插件红绿状态，后续再进行正常的周期检测”。
+- **深度根因排查**：
+  1. **前端页面存在首屏旧状态直接跳回的竞态**：在 `src/pages/blocked/App.tsx` 中，定义了响应 `state?.status === 'allowed'` 的自动跳回钩子。当页面首次挂载时，`guardStates` 读取的是本地 Session 中上一次存留的历史状态（之前为 `allowed`），钩子在没有等待实时核验完成的情况下，直接触发了 `setRedirecting(true)` 并执行 `location.replace(from)`，导致拦截页“一闪而过”就退出了。
+  2. **后台核验依赖了 5 分钟旧缓存，未执行实时新探测**：在 `src/background/guard-engine.ts` 的 `verifyAndAuthorizeTab` 中，宽松与抽样模式优先比对了 `getCheckState()`。由于该缓存有效期为 5 分钟，若用户在插件外切换了节点、断开了代理或发生异地漂移，旧缓存依然判断为通过，直接返回了放行结果。
+  3. **Action Badge 未在开屏检测时同步刷新**：由于未执行真实的主动探测，`updateBadge` 未被调用，导致右上角小图标（国家代码及绿/橙/红颜色状态）未能反映最新的网络判定。
+
+#### 2. 解决方案与执行逻辑遵循
+按照彩彩制定的严密逻辑体系重塑流程：
+1. **开屏检测（实时新鲜探测）**：
+   - 彻底废弃对旧缓存的盲信。在新建标签页触发开屏校验时，`verifyAndAuthorizeTab` 统一调用 `recheckAndApply(true)`，通过多源探针实时拉取当前真正的出口 IP、国家地区与 WebRTC 双栈特征。
+2. **规则生效（真实状态重算）**：
+   - 将实时拿到的检测结果代入站点规则比对引擎（`recomputeFromCheck`）。若真实落地与站点配置（国家代码、CIDR 网段、WebRTC 防护）一致，站点置为 `allowed`，将当前 `tabId` 写入 `excludedTabIds` 放行白名单；若存在异地不匹配或断流，站点坚决置为 `locked`，绝不放行。
+3. **结果同步插件红绿状态**：
+   - 在状态机重算以及 `verifyAndAuthorizeTab` 中，显式调用 `updateBadge()`，使右上角 Action Badge 实时显示最新检测到的国家代码，并立即根据判定结果变色：
+     - **绿色 (`#16a34a`)**：全部规则校验通过且无双栈泄漏，正常放行；
+     - **橙色 (`#ea580c`)**：存在规则不满足（落地地区违规、网段不符等），已拦截阻断；
+     - **黄色 (`#d97706`)**：存在双栈国家不一致等异常特征；
+     - **红色 (`#dc2626`)**：无法确定出口或探针失败。
+4. **彻底消除前端“一闪而过”竞态**：
+   - 在 `blocked/App.tsx` 的自动跳回 `useEffect` 中增加 `validating` 校验阻断保护：当首屏实时核验正在进行中时（`validating === true`），严禁执行任何基于旧状态的跳转。只有在首屏核验完成、且用户通过一键自愈/手动切换代理/临时放行使规则转为通过时，才允许跳回原网站。
+5. **后续正常周期检测**：
+   - 页面放行后，该标签页进入正常的放行模式（宽松模式满速交互，抽样模式按阈值抽样检测），后台 alarm 定时器按照用户设置的周期进行日常巡检，完全契合预期。
+
+#### 3. 修改的文件清单
+- **`src/background/guard-engine.ts`**：
+  - 导出 `updateBadge`，在 `recomputeFromCheck` 结尾加入实时更新调用；
+  - 重构 `verifyAndAuthorizeTab`：执行强制实时探测 `recheckAndApply(true)`，同步刷新 Action Badge 红绿状态，并根据最新状态决定是否放行。
+- **`src/pages/blocked/App.tsx`**：
+  - 在自动跳回 `useEffect` 依赖与条件中加入 `validating` 阻断，彻底消除首屏旧状态造成的闪烁放行缺陷。
+
+#### 4. 验证与回归测试记录
+- **单元测试集 (Vitest)**：执行 `npm test`，全套 6 个测试套件、46 项测试 **100% 全部通过**。
+- **静态类型检查 (TypeScript)**：执行 `npm run typecheck`，**0 错误、0 警告**。
+- **生产环境打包 (Vite)**：执行 `npm run build`，耗时 630ms 成功编译生成 `dist/`，全部资源构建正常。
+
+---
+
+### [2026-09-21] 泛域名规则支持、安全核验通过评分/UI纠正、1秒平滑确认延迟与 v3.2.0 版本跃升
+
+#### 1. 需求背景与问题排查
+用户（彩彩）在实测中反馈以下问题并提供了界面运行截图：
+1. **安全监测通过时的评分与 UI 不一致**：
+   - 目标站点在开屏核验通过时，落地页标题虽然显示“安全校验通过，正在自动返回…”，但下方评分卡片却显示 `50/100`、`中等风险 · 存在安全隐患`、黄色药丸 `安全阻断`，副文本亦显示“当前实际网络状态未满足放行要求...已在网络层强制拦截”，对比网格中间也标注为“安全阻断”，产生严重逻辑与视觉矛盾。
+   - **根因分析**：`src/pages/blocked/App.tsx` 中的 `risk` 计算逻辑硬编码了 `let score = 40` 与 `Math.max(50, score)`，当规则满足放行且无任何风险因子时，未设立安全通过分支，直接回退至 `50分` 与 `medium` 中等风险；同时页面说明文本与对比中间药丸写死为阻断描述。
+2. **落地跳转需延长至 1 秒**：
+   - 此前开屏通过后的跳回延迟为 150ms/250ms，跳转过快不仅一闪而过让用户无法看清环境匹配状态，也未给后台白名单规则持久化与浏览器网络连接层留出充足确认时间。
+3. **域名规则需支持泛域名**：
+   - 用户期望支持形如 `*.google.com` 或 `.google.com` 的泛域名规则，能同时精准覆盖本域及全部多级子域名。此前 `normalizeDomain` 强行剥离通配符，导致无法录入带 `*.` 的泛域名规则，且原域名比对函数未适配泛域名前缀。
+4. **版本号升级**：
+   - 从 `v3.1.9` 自增跃升至 `v3.2.0`。
+
+#### 2. 技术设计与详细改造
+1. **泛域名规则全面支持体系**：
+   - **`src/shared/matchers.ts`**：
+     - 重构 `normalizeDomain`：清洗协议（`https://` 等）、路径与端口后，识别 `*.` 或 `.` 前缀并将其规范化为标准泛域名 `*.domain.tld`，严格校验域名合法性；
+     - 新增并导出 `domainMatchesPattern(host: string, pattern: string): boolean`：
+       - 若模式为 `*.google.com`，自动匹配本域 `google.com` 以及各级子域（`www.google.com`、`mail.google.com`、`a.b.google.com`），绝不误伤 `fakegoogle.com`；
+       - 若模式为多级泛域名 `*.api.domain.com`，精准匹配 `api.domain.com` 和 `v1.api.domain.com`，与同域其他分支子域有效隔离；
+     - 重构 `urlMatchesDomain`：统一调用 `domainMatchesPattern` 进行严谨判定。
+   - **`src/shared/rules.ts`**：
+     - 在 `buildSiteRules` 中生成 Chrome DeclarativeNetRequest 规则时，自动将泛域名通配符剥离为纯域名 `requestDomains: [dnrDomain]`（因 Chrome DNR 原生不支持通配符字符，但原生自动匹配其所有子域）。
+   - **`src/shared/habits-core.ts`**：
+     - 重构 `domainCovered`：调用 `domainMatchesPattern`，使习惯学习覆盖检测天然兼容泛域名。
+   - **`src/pages/options/tabs/SitesTab.tsx`**：
+     - 规则列表对泛域名提供专属绿色 `泛域名` 标签；
+     - 优化表单输入提示：“生效范围：*.xxx（支持泛域名，自动包含全部多级子域）”。
+2. **安全核验放行评分卡片与正向 UI 彻底修正**：
+   - **`src/pages/blocked/App.tsx`**：
+     - 重构 `risk` 计算：当处于放行中状态（`redirecting`）或检测状态合规放行时，评分为 **100/100 满分**，等级置为 `'safe'`（`安全合规 · 准予通行`），药丸显示绿色 `安全放行`，火苗图标替换为绿色安全盾牌 `<ShieldCheck />`，风险因子展示正向安全说明；
+     - 动态文案适配：当放行时，描述文本切换为：“目标站点 **{domain}** 地区守护核验通过。当前实际落地网络环境与期望完全一致，安全校验达标，正在自动返回目标网站…”；
+     - 对比网格中间药丸：通过时展示绿色 `环境匹配`（`.compare-match-pill`），中间图标显示绿色盾牌徽标；
+     - 探测落地国家药丸：在通过时变更为绿色 `tag-ok`。
+   - **`src/pages/blocked/blocked.css`**：
+     - 新增 `.blocked-risk-card.risk-safe`、`.risk-safe .risk-score-num`、`.risk-safe .risk-shield-icon`；
+     - 新增 `.compare-match-pill` 与 `.compare-divider-icon.success` 绿色高亮主题。
+3. **1 秒跳转延迟与确认反馈机制**：
+   - 将开屏校验通过与守卫生效跳回的定时器从 150ms/250ms 统一调整为 **1000ms（1秒）**；
+   - 标题动态展示：“安全校验通过，1 秒后自动返回…”，并在下方呈现平滑同步指示器：“底层放行白名单与网络规则已确认，即将进入…”，给用户清晰感知，为底层网络连接提供充足确认窗口。
+4. **全项目版本跃升至 v3.2.0**：
+   - `public/manifest.json`：`"version": "3.2.0"`
+   - `package.json`：`"version": "3.2.0"`
+   - `package-lock.json`：`"version": "3.2.0"`
+
+#### 3. 修改的文件清单
+- **`src/shared/matchers.ts`**：升级 `normalizeDomain`，新增 `domainMatchesPattern`，重构 `urlMatchesDomain`；
+- **`src/shared/rules.ts`**：在 `buildSiteRules` 中规整剥离通配符，生成合法 DNR `requestDomains`；
+- **`src/shared/habits-core.ts`**：引入 `domainMatchesPattern` 支持泛域名覆盖判定；
+- **`src/pages/blocked/App.tsx`**：重构放行通过时的评分（100分）、safe 状态、正向描述与绿色对比徽标，延时统一设置为 1000ms；
+- **`src/pages/blocked/blocked.css`**：新增 `risk-safe` 与 `compare-match-pill` 样式；
+- **`src/pages/options/tabs/SitesTab.tsx`**：为泛域名规则显示专属徽章与输入提示；
+- **`tests/matchers.test.ts`** & **`tests/rules.test.ts`**：补充泛域名解析、匹配与 DNR 规则生成的单测用例；
+- **`package.json`**、`package-lock.json`、`public/manifest.json`：版本号自增至 `3.2.0`。
+
+#### 4. 验证与回归测试记录
+- **单元测试集 (Vitest)**：执行 `npm test`，全部 6 个测试套件、49 项测试（含新增泛域名单测）**100% 全部通过**。
+- **静态类型检查 (TypeScript)**：执行 `npm run typecheck`，**0 错误、0 警告**。
+- **生产环境打包 (Vite)**：执行 `npm run build`，耗时 738ms 成功打包输出生产包至 `dist/`，全部资源构建正常。
+
+---
+
+### [2026-09-21] 落地核验通过跳转延迟受控化、默认3秒与实时倒计时体验升级
+
+#### 1. 需求背景与功能目标
+用户（彩彩）反馈：“检测通过落地页现在是一秒延迟，设置成可以控制长度的，默认三秒”。
+为进一步提升自主把控度并给网络底层充足的会话建立确认时间，需要将放行跳转延迟从写死时长改造为用户全局可调控参数，默认值调整为 3 秒。
+
+#### 2. 技术设计与详细改造
+1. **全局设置扩展与持久化**：
+   - **`src/shared/types.ts`**：在 `Settings` 接口新增 `passRedirectDelaySec?: number` 属性，标明通过落地页返回目标网站的等待延迟秒数。
+   - **`src/shared/constants.ts`**：在 `DEFAULT_SETTINGS` 中配置 `passRedirectDelaySec: 3`，默认 3 秒。
+2. **控制中心选项配置面板**：
+   - **`src/pages/options/tabs/SettingsTab.tsx`**：在探测参数卡片中新增「安全检测通过后自动返回原网站延迟（秒）」控制器，支持 1 ~ 30 秒范围配置，附带清晰说明文案。
+3. **落地页逐秒倒计时与人性化快速跳回**：
+   - **`src/pages/blocked/App.tsx`**：
+     - 读取 `settings?.passRedirectDelaySec ?? 3`，首屏实时核验通过以及守护恢复自动放行均动态适配该时长；
+     - 增加 `countdown` 状态与每秒平滑递减定时器管理器，大标题动态展示：“安全校验通过，X 秒后自动返回…”；
+     - 归零时平滑执行 `location.replace(from)`；
+     - 提示条新增「立即跳回」快捷按钮，允许用户随时提前跳过倒计时直接进入网站。
+
+#### 3. 修改的文件清单
+- **`src/shared/types.ts`**：`Settings` 接口增加 `passRedirectDelaySec?: number`；
+- **`src/shared/constants.ts`**：`DEFAULT_SETTINGS` 增加 `passRedirectDelaySec: 3`；
+- **`src/pages/options/tabs/SettingsTab.tsx`**：增加延迟时间输入配置项；
+- **`src/pages/blocked/App.tsx`**：重构落地页倒计时与跳转逻辑，增加逐秒反馈与立即跳回按钮。
+
+#### 4. 验证与回归测试记录
+- **单元测试集 (Vitest)**：执行 `npm test`，全套 6 个测试套件、49 项测试 **100% 全部通过**。
+- **静态类型检查 (TypeScript)**：执行 `npm run typecheck`，**0 错误、0 警告**。
+- **生产环境打包 (Vite)**：执行 `npm run build`，耗时 593ms 成功打包至 `dist/`，全部资源构建正常。
+
 
 
 

@@ -75,6 +75,7 @@ export const DEFAULT_SETTINGS: Settings = {
   recheckMinutes: 30,
   webrtcProtect: true,
   trafficValidationLevel: 'relaxed',
+  passRedirectDelaySec: 3,
   habitEnabled: true,
   notifySuggestions: true,
   suggestWindowDays: 14,

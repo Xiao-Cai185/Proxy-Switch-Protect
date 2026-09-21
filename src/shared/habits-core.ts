@@ -1,3 +1,4 @@
+import { domainMatchesPattern } from './matchers';
 import type { HabitStore, ProtectedSite } from './types';
 
 /** 本地时区的 YYYY-MM-DD */
@@ -60,7 +61,7 @@ export function domainCovered(sites: ProtectedSite[], domain: string): boolean {
   return sites.some(
     (s) =>
       s.enabled &&
-      (domain === s.domainPattern || domain.endsWith(`.${s.domainPattern}`)),
+      domainMatchesPattern(domain, s.domainPattern),
   );
 }
 

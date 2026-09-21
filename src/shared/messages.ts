@@ -17,7 +17,13 @@ export type BgCommand =
   | { type: 'dismissSuggestion'; domain: string }
   | { type: 'testChecker'; checker: CheckerConfig }
   | { type: 'testProfile'; profileId: string }
-  | { type: 'getLevelOfControl' };
+  | { type: 'getLevelOfControl' }
+  | { type: 'verifyAndAllowTab'; siteId: string; tabId: number };
+
+export interface VerifyTabResult {
+  pass: boolean;
+  reason?: string;
+}
 
 export type BgResponse<T = unknown> =
   | { ok: true; data?: T }

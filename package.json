@@ -1,6 +1,6 @@
 {
   "name": "proxy-protect",
-  "version": "3.1.8",
+  "version": "3.2.0",
   "private": true,
   "type": "module",
   "description": "浏览器代理切换与域名落地 IP 守护插件",

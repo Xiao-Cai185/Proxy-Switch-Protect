@@ -14,9 +14,8 @@ import type {
  */
 export interface TabSession {
   tabId: number;
-  domain: string;
-  siteId: string;
-  verifiedAt: number;
+  /** 该标签页已通过开屏验证的受保护站点 ID 集合及时间戳 */
+  verifiedSites: Record<string, number>;
   requestCount: number;
   lastSampleCheckAt: number;
 }
@@ -60,29 +59,45 @@ export async function isTabSessionVerified(
   if (tabId <= 0) return false;
   const map = await loadSessions();
   const s = map[tabId];
-  if (!s) return false;
-  return s.siteId === siteId;
+  if (!s || !s.verifiedSites) return false;
+  return Boolean(s.verifiedSites[siteId]);
 }
 
 /**
- * 标记标签页已成功通过开屏校验
+ * 获取指定受保护站点已放行的全部标签页 ID 列表（用于 DNR Session 规则的 excludedTabIds）
+ */
+export async function getExcludedTabIdsForSite(siteId: string): Promise<number[]> {
+  const map = await loadSessions();
+  const tabIds: number[] = [];
+  for (const [idStr, s] of Object.entries(map)) {
+    if (s && s.verifiedSites && s.verifiedSites[siteId]) {
+      const id = Number(idStr);
+      if (id > 0) tabIds.push(id);
+    }
+  }
+  return tabIds;
+}
+
+/**
+ * 标记标签页已成功通过开屏校验并加入该站点的放行白名单
  */
 export async function markTabVerified(
   tabId: number,
   siteId: string,
-  domain: string,
+  _domain?: string,
 ): Promise<void> {
   if (tabId <= 0) return;
   const map = await loadSessions();
   const now = Date.now();
-  map[tabId] = {
+  const s = map[tabId] ?? {
     tabId,
-    siteId,
-    domain,
-    verifiedAt: now,
+    verifiedSites: {},
     requestCount: 0,
     lastSampleCheckAt: now,
   };
+  if (!s.verifiedSites) s.verifiedSites = {};
+  s.verifiedSites[siteId] = now;
+  map[tabId] = s;
   await persistSessions();
 }
 
@@ -125,11 +140,11 @@ export async function recordTabRequest(
   if (tabId <= 0) return false;
   const map = await loadSessions();
   const s = map[tabId];
-  if (!s || s.siteId !== siteId) return false;
+  if (!s || !s.verifiedSites || !s.verifiedSites[siteId]) return false;
 
-  s.requestCount += 1;
+  s.requestCount = (s.requestCount ?? 0) + 1;
   const now = Date.now();
-  const timeTrigger = now - s.lastSampleCheckAt >= SAMPLING_TIME_INTERVAL_MS;
+  const timeTrigger = now - (s.lastSampleCheckAt ?? 0) >= SAMPLING_TIME_INTERVAL_MS;
   const countTrigger = s.requestCount >= SAMPLING_REQUEST_INTERVAL;
 
   if (timeTrigger || countTrigger) {

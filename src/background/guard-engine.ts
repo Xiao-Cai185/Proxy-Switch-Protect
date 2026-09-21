@@ -15,6 +15,7 @@ import type { CheckState, GuardState, ProtectedSite } from '../shared/types';
 import { activeKeyOf, ensureCheck } from './ip-checker';
 import {
   clearAllTabSessions,
+  getExcludedTabIdsForSite,
   isCheckStateMatching,
   isTabSessionVerified,
   markTabVerified,
@@ -37,11 +38,11 @@ function serialize<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-/* ---------- declarativeNetRequest ---------- */
+/* ---------- declarativeNetRequest (Session Rules + 白名单排除) ---------- */
 
-function dnrGetRules(): Promise<chrome.declarativeNetRequest.Rule[]> {
+function dnrGetSessionRules(): Promise<chrome.declarativeNetRequest.Rule[]> {
   return new Promise((resolve, reject) => {
-    chrome.declarativeNetRequest.getDynamicRules((rules) => {
+    chrome.declarativeNetRequest.getSessionRules((rules) => {
       const err = chrome.runtime.lastError;
       if (err) reject(new Error(err.message));
       else resolve(rules);
@@ -49,12 +50,30 @@ function dnrGetRules(): Promise<chrome.declarativeNetRequest.Rule[]> {
   });
 }
 
-function dnrUpdate(options: chrome.declarativeNetRequest.UpdateRuleOptions): Promise<void> {
+function dnrUpdateSessionRules(
+  options: chrome.declarativeNetRequest.UpdateRuleOptions,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    chrome.declarativeNetRequest.updateDynamicRules(options, () => {
+    chrome.declarativeNetRequest.updateSessionRules(options, () => {
       const err = chrome.runtime.lastError;
       if (err) reject(new Error(err.message));
       else resolve();
+    });
+  });
+}
+
+/** 清理历史残留的动态规则，确保全链路迁移至 session rules */
+async function dnrClearLegacyDynamicRules(): Promise<void> {
+  return new Promise((resolve) => {
+    chrome.declarativeNetRequest.getDynamicRules((rules) => {
+      if (chrome.runtime.lastError || !rules || rules.length === 0) {
+        resolve();
+        return;
+      }
+      chrome.declarativeNetRequest.updateDynamicRules(
+        { removeRuleIds: rules.map((r) => r.id) },
+        () => resolve(),
+      );
     });
   });
 }
@@ -70,16 +89,47 @@ async function _setAll(
   for (const site of sites) {
     if (!site.enabled) continue;
     const st = states[site.id];
-    if (st && (st.status === 'locked' || st.status === 'checking')) {
-      rules.push(...buildSiteRules(site.id, site.domainPattern, [id++, id++], blockedBase()));
+    // 用户临时主动 bypass（如强行放行15分钟或暂停守护）：暂不应用阻断规则
+    if (st && st.status === 'bypass') {
+      continue;
     }
+
+    // 状态为 locked 或 checking：无放行白名单（全量标签页在 C++ 握手前阻断拦截）
+    // 状态为 allowed：规则底层依然常驻，但将已通过开屏验证的 tabIds 填入 excludedTabIds
+    let excluded: number[] | undefined;
+    if (st && st.status === 'allowed') {
+      const tabs = await getExcludedTabIdsForSite(site.id);
+      if (tabs.length > 0) {
+        excluded = tabs;
+      }
+    }
+
+    rules.push(
+      ...buildSiteRules(
+        site.id,
+        site.domainPattern,
+        [id++, id++],
+        blockedBase(),
+        excluded,
+      ),
+    );
   }
-  const existing = await dnrGetRules();
-  await dnrUpdate({
+
+  const existing = await dnrGetSessionRules();
+  await dnrUpdateSessionRules({
     removeRuleIds: existing.map((r) => r.id),
     addRules: rules as unknown as chrome.declarativeNetRequest.Rule[],
   });
+  await dnrClearLegacyDynamicRules();
   await setGuardStates(states);
+}
+
+/** 刷新全部 DNR 规则与白名单排除标签页 */
+export async function syncDnrRules(): Promise<void> {
+  await serialize(async () => {
+    const [sites, states] = await Promise.all([loadSites(), getGuardStates()]);
+    await _setAll(sites, states);
+  });
 }
 
 /* ---------- 状态计算 ---------- */
@@ -163,6 +213,7 @@ async function recomputeFromCheck(
   if (newlyLocked.length > 0) {
     await clearAllTabSessions();
   }
+  await updateBadge().catch(() => undefined);
   if (notify) for (const { site, cc } of newlyLocked) notifyLocked(site, cc);
 }
 
@@ -258,6 +309,7 @@ export async function onProtectedAccess(url: string, tabId?: number): Promise<vo
       for (const site of hits) {
         await markTabVerified(tabId, site.id, site.domainPattern);
       }
+      await syncDnrRules();
       return;
     }
   }
@@ -295,7 +347,7 @@ export async function onProtectedAccess(url: string, tabId?: number): Promise<vo
 
   const nextCs = await recheckAndApply(true);
 
-  // 4. 验证完成后，若放行且有 tabId，记录开屏放行会话
+  // 4. 验证完成后，若放行且有 tabId，记录开屏放行会话并同步放行白名单
   if (typeof tabId === 'number' && tabId > 0 && nextCs.status === 'ok') {
     const currentStates = await getGuardStates();
     for (const site of hits) {
@@ -303,7 +355,70 @@ export async function onProtectedAccess(url: string, tabId?: number): Promise<vo
         await markTabVerified(tabId, site.id, site.domainPattern);
       }
     }
+    await syncDnrRules();
   }
+}
+
+/**
+ * 同步更新右上角 Action Badge 徽标（国家代码与红/绿/橙颜色状态）
+ */
+export async function updateBadge(): Promise<void> {
+  const [cs, gs] = await Promise.all([getCheckState(), getGuardStates()]);
+  let text = '';
+  let color = '#64748b';
+  if (cs.status === 'checking') {
+    text = '…';
+  } else if (cs.status === 'error') {
+    text = '!';
+    color = '#dc2626';
+  } else if (cs.status === 'ok' && cs.result) {
+    text = cs.result.countryCode;
+    const anyLocked = Object.values(gs).some((s) => s.status === 'locked');
+    const mismatch = cs.result.stackMismatch;
+    color = anyLocked ? '#ea580c' : mismatch ? '#d97706' : '#16a34a';
+  }
+  await chrome.action.setBadgeText({ text });
+  await chrome.action.setBadgeBackgroundColor({ color });
+}
+
+/**
+ * 针对指定标签页核验并放行：
+ * 逻辑遵循：
+ * 1. 开屏检测：执行强制实时新探测（获取真实出口 IP、国家与 WebRTC 状态）；
+ * 2. 规则生效：根据最新探测结果通过 recomputeFromCheck 重算站点状态，更新 Session 规则；
+ * 3. 结果同步：实时同步更新右上角插件 Action Badge 的红绿状态与国家标识；
+ * 4. 判定放行：若最新判定合规，则将该标签页加入白名单（excludedTabIds）并允许放行；
+ *    若不合规，绝不放行，停留在拦截页并反馈最新原因。
+ */
+export async function verifyAndAuthorizeTab(
+  siteId: string,
+  tabId: number,
+): Promise<{ pass: boolean; reason?: string }> {
+  if (tabId <= 0) return { pass: false, reason: '无效的标签页 ID' };
+
+  // 1. 开屏检测：执行强制实时新探测并计算站点规则与状态
+  await recheckAndApply(true);
+
+  // 2. 结果同步插件红绿状态
+  await updateBadge().catch(() => undefined);
+
+  // 3. 读取该站点最新的判定结果
+  const [sites, prevStates] = await Promise.all([loadSites(), getGuardStates()]);
+  const site = sites.find((s) => s.id === siteId && s.enabled);
+  if (!site) return { pass: false, reason: '站点未启用或规则不存在' };
+
+  const st = prevStates[site.id];
+  const isPass = st?.status === 'allowed' || st?.status === 'bypass';
+
+  if (isPass) {
+    // 校验通过：将该标签页加入放行白名单并同步刷新 Session 规则
+    await markTabVerified(tabId, site.id, site.domainPattern);
+    await syncDnrRules();
+    return { pass: true };
+  }
+
+  // 校验未通过：保持阻断，返回具体违规原因
+  return { pass: false, reason: st?.reason || '未达到安全放行要求' };
 }
 
 /**

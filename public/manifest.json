@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Proxy Protect - 代理切换与域名守护",
-  "version": "3.1.8",
+  "version": "3.2.0",
   "description": "切换 HTTP/SOCKS4/SOCKS5 代理，检测落地 IP 与国家；为敏感网站绑定期望地区，IP 漂移时自动拦截，守护账号安全。",
   "minimum_chrome_version": "116",
   "background": {

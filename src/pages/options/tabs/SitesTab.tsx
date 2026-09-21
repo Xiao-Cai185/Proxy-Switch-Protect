@@ -86,6 +86,11 @@ export function SitesTab() {
               <div className="grow" style={{ minWidth: 0 }}>
                 <div className="row" style={{ gap: '8px' }}>
                   <b className="mono site-rule-domain">{site.domainPattern}</b>
+                  {site.domainPattern.startsWith('*.') && (
+                    <span className="tag tag-ok" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                      泛域名
+                    </span>
+                  )}
                   {!site.enabled && <span className="tag tag-muted">已停用</span>}
                   {site.note?.email && (
                     <span className="tag tag-primary" style={{ fontSize: '11px' }}>
@@ -258,7 +263,9 @@ function SiteForm({
           />
           {domain.trim() && (
             <span className={normalized ? 'field-hint' : 'field-error'}>
-              {normalized ? `生效范围：${normalized} 及其全部子域` : '域名格式不合法'}
+              {normalized
+                ? `生效范围：${normalized}（支持泛域名，自动包含全部多级子域）`
+                : '域名格式不合法，支持如 chatgpt.com 或 *.openai.com'}
             </span>
           )}
         </label>

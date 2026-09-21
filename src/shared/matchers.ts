@@ -1,30 +1,63 @@
 import type { ProtectedSite } from './types';
 
 /**
- * 规范化用户输入的域名：
- * 去协议/路径/端口/通配符/www 前缀，小写。非法输入返回 null。
+ * 规范化用户输入的域名或泛域名：
+ * - 支持普通域名（如 example.com）与泛域名（如 *.example.com 或 .example.com）
+ * - 去协议/路径/端口，转小写，泛域名统一规整为 *.domain.tld 格式
+ * - 非法输入返回 null
  */
 export function normalizeDomain(input: string): string | null {
   let s = input.trim().toLowerCase();
   if (!s) return null;
-  s = s.replace(/^\*\./, '');
-  try {
-    const url = new URL(s.includes('://') ? s : `http://${s}`);
-    s = url.hostname;
-  } catch {
-    return null;
+
+  // 1. 若带协议，先剥离协议（如 https://, http://）
+  s = s.replace(/^[a-z]+:\/\//, '');
+
+  // 2. 去除路径、查询参数、哈希和端口
+  const slashIdx = s.indexOf('/');
+  if (slashIdx >= 0) s = s.slice(0, slashIdx);
+  const qIdx = s.indexOf('?');
+  if (qIdx >= 0) s = s.slice(0, qIdx);
+  const hIdx = s.indexOf('#');
+  if (hIdx >= 0) s = s.slice(0, hIdx);
+  const portIdx = s.indexOf(':');
+  if (portIdx >= 0) s = s.slice(0, portIdx);
+
+  // 3. 判定是否为通配泛域名
+  const isWildcard = s.startsWith('*.') || s.startsWith('.');
+  s = s.replace(/^\*\./, '').replace(/^\./, '');
+
+  // 4. 清除尾随点与 www 前缀
+  s = s.replace(/\.$/, '');
+  if (!isWildcard) {
+    s = s.replace(/^www\./, '');
   }
-  s = s.replace(/\.$/, '').replace(/^www\./, '');
-  // 要求形如 xxx.tld（不接受纯 IP / 单标签主机名）
+
+  // 5. 要求形如 xxx.tld（不接受纯 IP / 单标签主机名）
   if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(s)) return null;
-  return s;
+
+  return isWildcard ? `*.${s}` : s;
 }
 
-/** URL 是否属于某域名（含子域），供 UI 与测试使用 */
-export function urlMatchesDomain(rawUrl: string, domain: string): boolean {
+/**
+ * 判定主机名 host 是否匹配目标域名或泛域名 pattern：
+ * - pattern 如 *.google.com：匹配 google.com 以及任何子域名（www.google.com, sub.mail.google.com 等）
+ * - pattern 如 google.com：自动覆盖其主域和子域名
+ * - pattern 如 *.api.google.com：精确匹配 api.google.com 与 v1.api.google.com，不会误伤 mail.google.com
+ */
+export function domainMatchesPattern(host: string, pattern: string): boolean {
+  if (!host || !pattern) return false;
+  const h = host.trim().toLowerCase().replace(/\.$/, '');
+  const p = pattern.trim().toLowerCase().replace(/^\*\./, '').replace(/^\./, '').replace(/\.$/, '');
+  if (!h || !p) return false;
+  return h === p || h.endsWith(`.${p}`);
+}
+
+/** URL 是否属于某域名或泛域名规则，供 UI、拦截与测试统一使用 */
+export function urlMatchesDomain(rawUrl: string, pattern: string): boolean {
   try {
     const host = new URL(rawUrl).hostname.toLowerCase().replace(/\.$/, '');
-    return host === domain || host.endsWith(`.${domain}`);
+    return domainMatchesPattern(host, pattern);
   } catch {
     return false;
   }

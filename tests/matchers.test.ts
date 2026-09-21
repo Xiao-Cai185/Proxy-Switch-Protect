@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  domainMatchesPattern,
   evaluateSite,
   getRegistrableDomain,
   ipInCidr,
@@ -17,8 +18,12 @@ describe('normalizeDomain', () => {
     expect(normalizeDomain('https://chatgpt.com/c/123?x=1')).toBe('chatgpt.com');
     expect(normalizeDomain('http://example.com:8080/a')).toBe('example.com');
   });
-  it('剥离通配符与 www 前缀并小写', () => {
-    expect(normalizeDomain('*.ChatGPT.com')).toBe('chatgpt.com');
+  it('完整支持泛域名规则并规整为 *.domain.tld 格式', () => {
+    expect(normalizeDomain('*.ChatGPT.com')).toBe('*.chatgpt.com');
+    expect(normalizeDomain('.openai.com')).toBe('*.openai.com');
+    expect(normalizeDomain('https://*.api.openai.com/v1')).toBe('*.api.openai.com');
+  });
+  it('普通域名剥离 www 前缀并小写', () => {
     expect(normalizeDomain('www.openai.com')).toBe('openai.com');
   });
   it('拒绝非法输入', () => {
@@ -29,13 +34,24 @@ describe('normalizeDomain', () => {
   });
 });
 
-describe('urlMatchesDomain', () => {
-  it('匹配本域与子域', () => {
+describe('domainMatchesPattern & urlMatchesDomain (支持泛域名)', () => {
+  it('普通域名匹配本域与子域', () => {
     expect(urlMatchesDomain('https://chatgpt.com/', 'chatgpt.com')).toBe(true);
     expect(urlMatchesDomain('https://chat.chatgpt.com/x', 'chatgpt.com')).toBe(true);
-  });
-  it('不误伤后缀相似的域', () => {
     expect(urlMatchesDomain('https://notchatgpt.com/', 'chatgpt.com')).toBe(false);
+  });
+  it('泛域名 *.domain.com 匹配本域与所有多级子域', () => {
+    expect(urlMatchesDomain('https://google.com/', '*.google.com')).toBe(true);
+    expect(urlMatchesDomain('https://www.google.com/search', '*.google.com')).toBe(true);
+    expect(urlMatchesDomain('https://mail.google.com/', '*.google.com')).toBe(true);
+    expect(urlMatchesDomain('https://sub.sub2.google.com/', '*.google.com')).toBe(true);
+    expect(urlMatchesDomain('https://fakegoogle.com/', '*.google.com')).toBe(false);
+  });
+  it('多级泛域名 *.api.domain.com 精确匹配子树而不误伤其他子域', () => {
+    expect(domainMatchesPattern('api.domain.com', '*.api.domain.com')).toBe(true);
+    expect(domainMatchesPattern('v1.api.domain.com', '*.api.domain.com')).toBe(true);
+    expect(domainMatchesPattern('mail.domain.com', '*.api.domain.com')).toBe(false);
+    expect(domainMatchesPattern('domain.com', '*.api.domain.com')).toBe(false);
   });
 });
 

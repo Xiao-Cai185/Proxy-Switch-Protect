@@ -179,6 +179,8 @@ async function handleCommand(cmd: BgCommand): Promise<unknown> {
       return testProfileIsolated(cmd.profileId);
     case 'getLevelOfControl':
       return getLevelOfControl();
+    case 'verifyAndAllowTab':
+      return guard.verifyAndAuthorizeTab(cmd.siteId, cmd.tabId);
     default:
       throw new Error('未知指令');
   }
