@@ -211,8 +211,8 @@ export function HabitsTab() {
             text={
               settings?.habitEnabled === false
                 ? '习惯统计功能已关闭，可在「全局设置」中开启'
-                : `暂无绑定建议。当某域名在 ${settings?.suggestWindowDays ?? 14} 天内有 ${
-                    settings?.suggestMinDays ?? 5
+                : `暂无绑定建议。当某域名在 ${settings?.suggestWindowDays ?? 5} 天内有 ${
+                    settings?.suggestMinDays ?? 3
                   } 天以上习惯使用同一国家落地访问时，将自动在此处提示。`
             }
             icon={Sparkles}

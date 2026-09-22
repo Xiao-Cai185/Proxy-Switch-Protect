@@ -123,7 +123,7 @@ export function NotesTab() {
       <div className="banner banner-info">
         <BookOpen size={16} />
         <div className="small">
-          所有账号与邮箱备忘信息**完全仅存放在您的本机浏览器本地存储中**，绝不上载任何云端，支持随时导出与清空。
+          所有账号与邮箱备忘信息完全仅存放在您的本机浏览器本地存储中，绝不上载任何云端，支持随时导出与清空。
         </div>
       </div>
 

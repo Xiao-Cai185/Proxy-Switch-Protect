@@ -1,6 +1,6 @@
 import { FRESH_RESULT_MS, SK } from '../shared/constants';
 import { evaluateSiteDetails, isFresh } from '../shared/matchers';
-import { getSession, setSession } from '../shared/storage';
+import { getLocal, getSession, setLocal, setSession } from '../shared/storage';
 import type {
   CheckState,
   ProtectedSite,
@@ -10,7 +10,7 @@ import type {
 
 /**
  * 标签页安全会话：
- * 记录通过开屏验证的标签页状态，支持第二等级（抽样检测）与第三等级（宽松效率模式）。
+ * 记录通过开屏验证的标签页状态，支持第二等级（抽样检测）、第三等级（宽松效率模式）、第四等级（时间画像）以及严格模式（宽容计数与周期复检）。
  */
 export interface TabSession {
   tabId: number;
@@ -18,6 +18,34 @@ export interface TabSession {
   verifiedSites: Record<string, number>;
   requestCount: number;
   lastSampleCheckAt: number;
+  /** 严格模式：单次标签页已验证放行的页内资源计数 */
+  strictResourceCount?: Record<string, number>;
+  /** 严格模式：上一次周期复检的时间戳 */
+  strictLastRecheckAt?: Record<string, number>;
+}
+
+/** 站点时间画像历史记录（用于第 1 等级 time_window 策略） */
+export interface SiteVerificationRecord {
+  timestamp: number;
+  profileId: string;
+}
+
+const SK_SITE_VERIFICATIONS = 'siteVerifications';
+let siteVerificationsCache: Record<string, SiteVerificationRecord> | null = null;
+
+async function loadSiteVerifications(): Promise<Record<string, SiteVerificationRecord>> {
+  if (siteVerificationsCache) return siteVerificationsCache;
+  const stored = await getLocal<Record<string, SiteVerificationRecord> | null>(
+    SK_SITE_VERIFICATIONS,
+    null,
+  );
+  siteVerificationsCache = stored ?? {};
+  return siteVerificationsCache;
+}
+
+async function persistSiteVerifications(): Promise<void> {
+  if (!siteVerificationsCache) return;
+  await setLocal(SK_SITE_VERIFICATIONS, siteVerificationsCache);
 }
 
 /** 内存高速缓存，与 chrome.storage.session 双向保持一致 */
@@ -155,6 +183,100 @@ export async function recordTabRequest(
   }
 
   return false;
+}
+
+/**
+ * 记录站点时间画像验证成功记录（用于第 1 等级 time_window 策略）
+ */
+export async function recordSiteVerification(
+  siteId: string,
+  profileId: string,
+): Promise<void> {
+  const map = await loadSiteVerifications();
+  map[siteId] = {
+    timestamp: Date.now(),
+    profileId,
+  };
+  await persistSiteVerifications();
+}
+
+/**
+ * 移除单个站点的时间画像验证记录（该站点异常违规锁定时）
+ */
+export async function removeSiteVerification(siteId: string): Promise<void> {
+  const map = await loadSiteVerifications();
+  if (siteId in map) {
+    delete map[siteId];
+    await persistSiteVerifications();
+  }
+}
+
+/**
+ * 清空全部站点时间画像验证记录（切换代理或手动全部锁定时）
+ */
+export async function clearSiteVerifications(): Promise<void> {
+  siteVerificationsCache = {};
+  await persistSiteVerifications();
+}
+
+/**
+ * 判定受保护站点是否在时间画像的免检窗口期内（且当前代理节点一致）
+ */
+export async function isSiteWithinTimeWindow(
+  siteId: string,
+  profileId: string,
+  windowMinutes: number,
+): Promise<boolean> {
+  if (windowMinutes <= 0) return false;
+  const map = await loadSiteVerifications();
+  const rec = map[siteId];
+  if (!rec) return false;
+  if (rec.profileId !== profileId) return false;
+  const elapsed = Date.now() - rec.timestamp;
+  if (elapsed > windowMinutes * 60_000) {
+    delete map[siteId];
+    void persistSiteVerifications().catch(() => undefined);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * 严格模式下处理单标签页内的页内资源请求：
+ * - 验证通过 5 条（或设定值）页内资源后宽容放行后续资源，避免网页整体不可用
+ * - 每隔设定分钟（默认 5 分钟）返回 shouldRecheck = true，触发后台异步静默复检
+ */
+export async function recordStrictResourceRequest(
+  tabId: number,
+  siteId: string,
+  toleranceCount = 5,
+  recheckMinutes = 5,
+): Promise<{ shouldRecheck: boolean; isTolerated: boolean }> {
+  if (tabId <= 0) return { shouldRecheck: false, isTolerated: false };
+  const map = await loadSessions();
+  const s = map[tabId];
+  if (!s || !s.verifiedSites || !s.verifiedSites[siteId]) {
+    return { shouldRecheck: false, isTolerated: false };
+  }
+
+  if (!s.strictResourceCount) s.strictResourceCount = {};
+  if (!s.strictLastRecheckAt) s.strictLastRecheckAt = {};
+
+  const currentCount = s.strictResourceCount[siteId] ?? 0;
+  s.strictResourceCount[siteId] = currentCount + 1;
+
+  const now = Date.now();
+  const lastRecheck = s.strictLastRecheckAt[siteId] ?? s.verifiedSites[siteId] ?? now;
+  const isTolerated = s.strictResourceCount[siteId] >= toleranceCount;
+
+  let shouldRecheck = false;
+  if (recheckMinutes > 0 && now - lastRecheck >= recheckMinutes * 60_000) {
+    s.strictLastRecheckAt[siteId] = now;
+    shouldRecheck = true;
+  }
+
+  await persistSessions();
+  return { shouldRecheck, isTolerated };
 }
 
 /**

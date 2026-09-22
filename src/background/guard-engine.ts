@@ -11,14 +11,19 @@ import {
   loadSites,
   setGuardStates,
 } from '../shared/storage';
-import type { CheckState, GuardState, ProtectedSite } from '../shared/types';
+import type { CheckState, GuardState, ProtectedSite, Settings } from '../shared/types';
 import { activeKeyOf, ensureCheck } from './ip-checker';
 import {
   clearAllTabSessions,
+  clearSiteVerifications,
   getExcludedTabIdsForSite,
   isCheckStateMatching,
+  isSiteWithinTimeWindow,
   isTabSessionVerified,
   markTabVerified,
+  recordSiteVerification,
+  removeSiteVerification,
+  removeTabSession,
   resolveEffectiveLevel,
 } from './traffic-policy';
 
@@ -86,6 +91,9 @@ async function _setAll(
 ): Promise<void> {
   const rules: DnrRuleJson[] = [];
   let id = 1;
+  const [settings, activeId] = await Promise.all([loadSettings(), loadActiveProfileId()]);
+  const activeKey = activeKeyOf(activeId);
+
   for (const site of sites) {
     if (!site.enabled) continue;
     const st = states[site.id];
@@ -94,8 +102,24 @@ async function _setAll(
       continue;
     }
 
-    // 状态为 locked 或 checking：无放行白名单（全量标签页在 C++ 握手前阻断拦截）
-    // 状态为 allowed：规则底层依然常驻，但将已通过开屏验证的 tabIds 填入 excludedTabIds
+    const level = resolveEffectiveLevel(site, settings);
+
+    // 第 1 等级：基于时间画像策略
+    // 若状态为 allowed 且在免检时间窗口内，无需下发任何 DNR 拦截规则，所有新建标签页秒开直通
+    if (level === 'time_window' && st && st.status === 'allowed') {
+      const withinWindow = await isSiteWithinTimeWindow(
+        site.id,
+        activeKey,
+        settings.timeWindowMinutes ?? 60,
+      );
+      if (withinWindow) {
+        continue;
+      }
+    }
+
+    // 第 2 等级（宽松）、第 3 等级（抽样）与第 4 等级（严格）：
+    // 状态为 allowed 时，底层规则依然常驻，仅将已通过开屏验证的 tabIds 填入 excludedTabIds。
+    // 这样新开的标签页（未在 tabs 白名单中）均会触发开屏检测并进入拦截校验，完成验证后放行！
     let excluded: number[] | undefined;
     if (st && st.status === 'allowed') {
       const tabs = await getExcludedTabIdsForSite(site.id);
@@ -183,6 +207,10 @@ async function recomputeFromCheck(
         reason = failureParts.join('；') || '未达到安全放行要求';
       }
 
+      if (isPass) {
+        await recordSiteVerification(site.id, activeKey);
+      }
+
       next = isPass
         ? { siteId: site.id, status: 'allowed', updatedAt: now }
         : {
@@ -212,6 +240,9 @@ async function recomputeFromCheck(
   await _setAll(sites, states);
   if (newlyLocked.length > 0) {
     await clearAllTabSessions();
+    for (const { site } of newlyLocked) {
+      await removeSiteVerification(site.id);
+    }
   }
   await updateBadge().catch(() => undefined);
   if (notify) for (const { site, cc } of newlyLocked) notifyLocked(site, cc);
@@ -262,28 +293,23 @@ export async function onProtectedAccess(url: string, tabId?: number): Promise<vo
   const hits = matchingSites(url, sites);
   if (hits.length === 0) return;
 
-  // 1. 如果带有有效 tabId，先判定是否已在宽松模式或抽样模式下通过开屏验证
+  // 1. 如果带有有效 tabId，先判定是否已在对应模式下通过开屏验证
   if (typeof tabId === 'number' && tabId > 0) {
     let allSessionsValid = true;
     for (const site of hits) {
-      const level = resolveEffectiveLevel(site, settings);
-      if (level === 'strict') {
-        allSessionsValid = false;
-        break;
-      }
       const isVerified = await isTabSessionVerified(tabId, site.id);
       if (!isVerified) {
         allSessionsValid = false;
         break;
       }
     }
-    // 若命中站点的开屏会话均已获放行许可，后续页面内交互流量直接放行！
+    // 若命中站点的会话均已获放行许可，后续页面内交互流量直接放行！
     if (allSessionsValid) {
       return;
     }
   }
 
-  // 2. 针对开屏请求，检查当前是否已有新鲜且合规的检测结果（针对 sampling 与 relaxed 模式）
+  // 2. 针对开屏请求，检查第四等级（time_window）以及 sampling 与 relaxed 模式
   const cs = await getCheckState();
   const activeKey = activeKeyOf(await loadActiveProfileId());
   const webrtcProtect = settings.webrtcProtect !== false;
@@ -297,7 +323,28 @@ export async function onProtectedAccess(url: string, tabId?: number): Promise<vo
         canDirectAllow = false;
         break;
       }
-      const siteAllowed = prevStates[site.id]?.status === 'allowed' || prevStates[site.id]?.status === 'bypass';
+      if (level === 'time_window') {
+        const withinWindow = await isSiteWithinTimeWindow(
+          site.id,
+          activeKey,
+          settings.timeWindowMinutes ?? 60,
+        );
+        const isExplicitLocked = prevStates[site.id]?.status === 'locked';
+        if (!withinWindow || isExplicitLocked) {
+          canDirectAllow = false;
+          break;
+        }
+        continue;
+      }
+      // 对于第 2 (relaxed)、第 3 (sampling) 与第 4 (strict) 等级：
+      // 新建标签页必须通过开屏检测，尚未在放行白名单中的标签页绝不在此处静默直接放行
+      const tabVerified = await isTabSessionVerified(tabId, site.id);
+      if (!tabVerified) {
+        canDirectAllow = false;
+        break;
+      }
+      const siteAllowed =
+        prevStates[site.id]?.status === 'allowed' || prevStates[site.id]?.status === 'bypass';
       const checkValid = isCheckStateMatching(site, cs, activeKey, webrtcProtect);
       if (!siteAllowed || !checkValid) {
         canDirectAllow = false;
@@ -306,10 +353,21 @@ export async function onProtectedAccess(url: string, tabId?: number): Promise<vo
     }
 
     if (canDirectAllow) {
+      let stateChanged = false;
+      const states = { ...prevStates };
       for (const site of hits) {
         await markTabVerified(tabId, site.id, site.domainPattern);
+        await recordSiteVerification(site.id, activeKey);
+        if (states[site.id]?.status !== 'allowed' && states[site.id]?.status !== 'bypass') {
+          states[site.id] = { siteId: site.id, status: 'allowed', updatedAt: Date.now() };
+          stateChanged = true;
+        }
       }
-      await syncDnrRules();
+      if (stateChanged) {
+        await _setAll(sites, states);
+      } else {
+        await syncDnrRules();
+      }
       return;
     }
   }
@@ -351,8 +409,12 @@ export async function onProtectedAccess(url: string, tabId?: number): Promise<vo
   if (typeof tabId === 'number' && tabId > 0 && nextCs.status === 'ok') {
     const currentStates = await getGuardStates();
     for (const site of hits) {
-      if (currentStates[site.id]?.status === 'allowed' || currentStates[site.id]?.status === 'bypass') {
+      if (
+        currentStates[site.id]?.status === 'allowed' ||
+        currentStates[site.id]?.status === 'bypass'
+      ) {
         await markTabVerified(tabId, site.id, site.domainPattern);
+        await recordSiteVerification(site.id, activeKey);
       }
     }
     await syncDnrRules();
@@ -360,10 +422,32 @@ export async function onProtectedAccess(url: string, tabId?: number): Promise<vo
 }
 
 /**
- * 同步更新右上角 Action Badge 徽标（国家代码与红/绿/橙颜色状态）
+ * 同步更新右上角 Action Badge 徽标与扩展图标：
+ * - 缺省托管状态（未选择代理节点，!activeId）：图标切换为橙色盾牌 (icons/icon*-orange.png)，Badge 呈现橙色
+ * - 激活代理节点后：图标恢复为蓝色盾牌 (icons/icon*.png)，Badge 恢复正常红绿状态
  */
 export async function updateBadge(): Promise<void> {
-  const [cs, gs] = await Promise.all([getCheckState(), getGuardStates()]);
+  const [cs, gs, activeId] = await Promise.all([
+    getCheckState(),
+    getGuardStates(),
+    loadActiveProfileId(),
+  ]);
+
+  const isDefaultManaged = !activeId;
+  const iconSuffix = isDefaultManaged ? '-orange.png' : '.png';
+  try {
+    await chrome.action.setIcon({
+      path: {
+        16: `icons/icon16${iconSuffix}`,
+        32: `icons/icon32${iconSuffix}`,
+        48: `icons/icon48${iconSuffix}`,
+        128: `icons/icon128${iconSuffix}`,
+      },
+    });
+  } catch {
+    // ignore
+  }
+
   let text = '';
   let color = '#64748b';
   if (cs.status === 'checking') {
@@ -375,7 +459,11 @@ export async function updateBadge(): Promise<void> {
     text = cs.result.countryCode;
     const anyLocked = Object.values(gs).some((s) => s.status === 'locked');
     const mismatch = cs.result.stackMismatch;
-    color = anyLocked ? '#ea580c' : mismatch ? '#d97706' : '#16a34a';
+    if (isDefaultManaged) {
+      color = '#ea580c'; // 缺省托管状态展示醒目橙色
+    } else {
+      color = anyLocked ? '#ea580c' : mismatch ? '#d97706' : '#16a34a';
+    }
   }
   await chrome.action.setBadgeText({ text });
   await chrome.action.setBadgeBackgroundColor({ color });
@@ -396,23 +484,61 @@ export async function verifyAndAuthorizeTab(
 ): Promise<{ pass: boolean; reason?: string }> {
   if (tabId <= 0) return { pass: false, reason: '无效的标签页 ID' };
 
-  // 1. 开屏检测：执行强制实时新探测并计算站点规则与状态
-  await recheckAndApply(true);
-
-  // 2. 结果同步插件红绿状态
-  await updateBadge().catch(() => undefined);
-
-  // 3. 读取该站点最新的判定结果
-  const [sites, prevStates] = await Promise.all([loadSites(), getGuardStates()]);
+  const [sites, prevStates, settings, activeId, cs] = await Promise.all([
+    loadSites(),
+    getGuardStates(),
+    loadSettings(),
+    loadActiveProfileId(),
+    getCheckState(),
+  ]);
   const site = sites.find((s) => s.id === siteId && s.enabled);
   if (!site) return { pass: false, reason: '站点未启用或规则不存在' };
 
-  const st = prevStates[site.id];
+  const activeKey = activeKeyOf(activeId);
+  const level = resolveEffectiveLevel(site, settings);
+
+  // 1. 若为第 1 等级（时间画像），检查是否处于免检时间窗口内且未被显式锁定
+  if (level === 'time_window') {
+    const withinWindow = await isSiteWithinTimeWindow(
+      site.id,
+      activeKey,
+      settings.timeWindowMinutes ?? 60,
+    );
+    if (withinWindow && prevStates[site.id]?.status !== 'locked') {
+      await markTabVerified(tabId, site.id, site.domainPattern);
+      const states = { ...prevStates };
+      states[site.id] = { siteId: site.id, status: 'allowed', updatedAt: Date.now() };
+      await _setAll(sites, states);
+      await updateBadge().catch(() => undefined);
+      return { pass: true };
+    }
+  }
+
+  // 2. 检查当前 checkState 是否新鲜且符合站点期望（非 strict 模式直接免探测快速放行）
+  const webrtcProtect = settings.webrtcProtect !== false;
+  if (level !== 'strict' && isCheckStateMatching(site, cs, activeKey, webrtcProtect)) {
+    await markTabVerified(tabId, site.id, site.domainPattern);
+    await recordSiteVerification(site.id, activeKey);
+    const states = { ...prevStates };
+    states[site.id] = { siteId: site.id, status: 'allowed', updatedAt: Date.now() };
+    await _setAll(sites, states);
+    await updateBadge().catch(() => undefined);
+    return { pass: true };
+  }
+
+  // 3. 严格模式或未就绪：执行开屏强制新探测
+  await recheckAndApply(true);
+  await updateBadge().catch(() => undefined);
+
+  // 4. 读取该站点最新的判定结果
+  const updatedStates = await getGuardStates();
+  const st = updatedStates[site.id];
   const isPass = st?.status === 'allowed' || st?.status === 'bypass';
 
   if (isPass) {
     // 校验通过：将该标签页加入放行白名单并同步刷新 Session 规则
     await markTabVerified(tabId, site.id, site.domainPattern);
+    await recordSiteVerification(site.id, activeKey);
     await syncDnrRules();
     return { pass: true };
   }
@@ -457,14 +583,74 @@ export async function triggerSamplingCheck(siteId: string): Promise<void> {
   }
 }
 
-/** SW / 浏览器启动：默认全锁，再强制验 IP */
+/**
+ * 严格模式周期复检：
+ * 单标签页验证通过特定条数页内资源放行后，每隔设定分钟（默认 5 分钟）静默探测出口 IP；
+ * 若检测到 IP 漂移或规则不满足，立即撤销放行并触发锁屏拦截。
+ */
+export async function triggerStrictPeriodicRecheck(siteId: string, tabId: number): Promise<void> {
+  const [sites, settings, activeId] = await Promise.all([
+    loadSites(),
+    loadSettings(),
+    loadActiveProfileId(),
+  ]);
+  const site = sites.find((s) => s.id === siteId && s.enabled);
+  if (!site) return;
+
+  const activeKey = activeKeyOf(activeId);
+  const webrtcProtect = settings.webrtcProtect !== false;
+
+  try {
+    const cs = await ensureCheck(true);
+    const pass = isCheckStateMatching(site, cs, activeKey, webrtcProtect);
+    if (!pass) {
+      await removeTabSession(tabId);
+      await clearAllTabSessions();
+      await clearSiteVerifications();
+      await lockAndRecheck(
+        `严格模式周期复检发现落地 IP 异常（当前 ${cs.result?.countryCode || '未知'} / ${
+          cs.result?.ip || '未知'
+        }），已阻断拦截`,
+      );
+    }
+  } catch {
+    await removeTabSession(tabId);
+    await clearAllTabSessions();
+    await clearSiteVerifications();
+    await lockAndRecheck('严格模式周期复检无法确认落地 IP，为安全起见已阻断拦截');
+  }
+}
+
+/** SW / 浏览器启动：默认全锁，再强制验 IP（若处于有效 time_window 免检窗口期内，保护放行状态不被锁死） */
 export async function initGuard(): Promise<void> {
   await clearAllTabSessions();
   await serialize(async () => {
-    const sites = await loadSites();
+    const [sites, prev, settings, activeId] = await Promise.all([
+      loadSites(),
+      getGuardStates(),
+      loadSettings(),
+      loadActiveProfileId(),
+    ]);
+    const activeKey = activeKeyOf(activeId);
     const now = Date.now();
-    const states: Record<string, GuardState> = {};
+    const states: Record<string, GuardState> = { ...prev };
     for (const site of sites.filter((s) => s.enabled)) {
+      const p = prev[site.id];
+      if (p?.status === 'bypass' && p.bypassUntil && p.bypassUntil > now) {
+        continue;
+      }
+      const level = resolveEffectiveLevel(site, settings);
+      if (level === 'time_window') {
+        const withinWindow = await isSiteWithinTimeWindow(
+          site.id,
+          activeKey,
+          settings.timeWindowMinutes ?? 60,
+        );
+        if (withinWindow && p?.status !== 'locked') {
+          states[site.id] = { siteId: site.id, status: 'allowed', updatedAt: now };
+          continue;
+        }
+      }
       states[site.id] = {
         siteId: site.id,
         status: 'checking',
@@ -499,8 +685,57 @@ export async function recheckAndApply(_force = true): Promise<CheckState> {
   return cs;
 }
 
+/**
+ * 策略配置项变更响应：
+ * 当切换 1~4 策略等级或调整时间窗口、抽样/严格模式参数时，
+ * 彻底清除时间画像与标签页会话白名单，重置护航状态，杜绝任何黏连耦合，
+ * 确保换到 2/3/4 等级后即刻生效，重新触发开屏检测！
+ */
+export async function onSettingsChanged(
+  oldSettings?: Settings,
+  newSettings?: Settings,
+): Promise<void> {
+  const levelChanged =
+    oldSettings?.trafficValidationLevel !== newSettings?.trafficValidationLevel;
+  const timeWindowChanged =
+    oldSettings?.timeWindowMinutes !== newSettings?.timeWindowMinutes;
+  const strictToleranceChanged =
+    oldSettings?.strictToleranceCount !== newSettings?.strictToleranceCount;
+  const strictRecheckChanged =
+    oldSettings?.strictRecheckMinutes !== newSettings?.strictRecheckMinutes;
+
+  if (levelChanged || timeWindowChanged || strictToleranceChanged || strictRecheckChanged) {
+    await clearAllTabSessions();
+    await clearSiteVerifications();
+
+    await serialize(async () => {
+      const sites = await loadSites();
+      const prev = await getGuardStates();
+      const now = Date.now();
+      const states: Record<string, GuardState> = {};
+      for (const site of sites.filter((s) => s.enabled)) {
+        const p = prev[site.id];
+        if (p?.status === 'bypass' && p.bypassUntil && p.bypassUntil > now) {
+          states[site.id] = p;
+        } else {
+          states[site.id] = {
+            siteId: site.id,
+            status: 'checking',
+            reason: '策略等级已调整，重新开屏校验',
+            updatedAt: now,
+          };
+        }
+      }
+      await _setAll(sites, states);
+    });
+
+    await recheckAndApply(true);
+  }
+}
+
 export async function onSitesChanged(): Promise<void> {
   await clearAllTabSessions();
+  await clearSiteVerifications();
   // 规则变更后先锁再强制验，避免旧 ok 直接放行新规则
   await serialize(async () => {
     const sites = await loadSites();
@@ -572,6 +807,7 @@ export async function onBypassExpired(_siteId: string): Promise<void> {
 export async function relockAll(): Promise<void> {
   await clearBypassAlarms();
   await clearAllTabSessions();
+  await clearSiteVerifications();
   await serialize(async () => {
     const cur = await getCheckState();
     await recomputeFromCheck(cur, false, true);

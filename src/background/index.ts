@@ -7,8 +7,6 @@ import {
 } from '../shared/constants';
 import type { BgCommand, BgResponse } from '../shared/messages';
 import {
-  getCheckState,
-  getGuardStates,
   getLocal,
   loadActiveProfileId,
   loadSettings,
@@ -17,7 +15,7 @@ import {
   setLocal,
 } from '../shared/storage';
 import { urlMatchesDomain } from '../shared/matchers';
-import type { ProxyProfile } from '../shared/types';
+import type { ProxyProfile, Settings } from '../shared/types';
 import * as guard from './guard-engine';
 import { acceptSuggestion, dismissSuggestion, initHabitLearner } from './habit-learner';
 import { testChecker, testProfileIsolated } from './ip-checker';
@@ -30,6 +28,7 @@ import {
 } from './proxy-manager';
 import {
   initTrafficPolicy,
+  recordStrictResourceRequest,
   recordTabRequest,
   resolveEffectiveLevel,
 } from './traffic-policy';
@@ -41,7 +40,7 @@ initAuthListener();
 initHabitLearner();
 initTrafficPolicy();
 
-/** 后续交互流量只读监听：仅针对抽样检测模式（Level 2）触发平滑二次复核 */
+/** 后续交互流量只读监听：针对抽样检测模式（Level 2）与严格模式（Level 1 宽容计数/周期复检）触发平滑二次复核 */
 chrome.webRequest.onBeforeRequest.addListener(
   (details) => {
     if (details.tabId <= 0) return undefined;
@@ -87,10 +86,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (K.sites in changes) void guard.onSitesChanged().catch(() => undefined);
     if (K.settings in changes) {
       void rescheduleRecheck().catch(() => undefined);
-      const next = changes[K.settings].newValue as { webrtcProtect?: boolean } | undefined;
+      const oldS = changes[K.settings].oldValue as Settings | undefined;
+      const next = changes[K.settings].newValue as Settings | undefined;
       if (next && typeof next.webrtcProtect === 'boolean') {
         void applyWebRtcPolicy(next.webrtcProtect).catch(() => undefined);
       }
+      void guard.onSettingsChanged(oldS, next).catch(() => undefined);
+    }
+    if (K.activeProfileId in changes) {
+      void guard.updateBadge().catch(() => undefined);
     }
     if (K.profiles in changes) {
       void handleProfilesChanged(
@@ -99,7 +103,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
       ).catch(() => undefined);
     }
   } else if (area === 'session') {
-    void updateBadge().catch(() => undefined);
+    void guard.updateBadge().catch(() => undefined);
   }
 });
 
@@ -136,6 +140,16 @@ async function handleSubsequentRequest(tabId: number, url: string): Promise<void
     if (shouldSample) {
       void guard.triggerSamplingCheck(hit.id).catch(() => undefined);
     }
+  } else if (level === 'strict') {
+    const { shouldRecheck } = await recordStrictResourceRequest(
+      tabId,
+      hit.id,
+      settings.strictToleranceCount ?? 5,
+      settings.strictRecheckMinutes ?? 5,
+    );
+    if (shouldRecheck) {
+      void guard.triggerStrictPeriodicRecheck(hit.id, tabId).catch(() => undefined);
+    }
   }
 }
 
@@ -147,7 +161,7 @@ async function init(): Promise<void> {
   await applyWebRtcPolicy().catch(() => undefined);
   await guard.initGuard();
   await rescheduleRecheck();
-  await updateBadge();
+  await guard.updateBadge();
 }
 
 async function handleCommand(cmd: BgCommand): Promise<unknown> {
@@ -224,21 +238,3 @@ async function rescheduleRecheck(): Promise<void> {
   }
 }
 
-async function updateBadge(): Promise<void> {
-  const [cs, gs] = await Promise.all([getCheckState(), getGuardStates()]);
-  let text = '';
-  let color = '#64748b';
-  if (cs.status === 'checking') {
-    text = '…';
-  } else if (cs.status === 'error') {
-    text = '!';
-    color = '#dc2626';
-  } else if (cs.status === 'ok' && cs.result) {
-    text = cs.result.countryCode;
-    const anyLocked = Object.values(gs).some((s) => s.status === 'locked');
-    const mismatch = cs.result.stackMismatch;
-    color = anyLocked ? '#ea580c' : mismatch ? '#d97706' : '#16a34a';
-  }
-  await chrome.action.setBadgeText({ text });
-  await chrome.action.setBadgeBackgroundColor({ color });
-}

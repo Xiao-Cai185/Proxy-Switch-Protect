@@ -100,8 +100,7 @@ export function App() {
           });
           if (!isMounted) return;
           if (res.pass) {
-            setCountdown(targetDelaySec);
-            setRedirecting(true);
+            location.replace(from);
             return;
           }
         }

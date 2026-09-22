@@ -88,21 +88,28 @@ html {
 }
 
 .popup-header-actions {
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
 }
 
-/* WebRTC 状态小胶囊 */
+/* 状态小胶囊徽章 */
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
+  gap: 3.5px;
+  padding: 2.5px 7px;
   border-radius: var(--radius-full);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   border: 1px solid var(--border-card);
   background: var(--bg-card);
+  white-space: nowrap;
+  line-height: 1.2;
   transition: all 0.2s ease;
+  user-select: none;
 }
 
 .chip-ok {
@@ -115,6 +122,39 @@ html {
   color: var(--text-muted);
   background: var(--bg-surface);
   border-color: transparent;
+}
+
+.chip-policy {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 3.5px;
+  cursor: pointer;
+}
+
+.chip-policy:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.header-setting-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.header-setting-btn:hover {
+  color: var(--text-main);
+  background: var(--bg-surface-hover);
+  transform: rotate(30deg);
 }
 
 /* 落地 IP 状态面板 (ExitIpPanel 专属样式) */
@@ -270,6 +310,59 @@ html {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.list-card.list-card-default-mode {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: linear-gradient(180deg, rgba(59, 130, 246, 0.03) 0%, var(--bg-card) 100%);
+}
+
+.list-default-banner {
+  margin: 3px 3px 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(16, 185, 129, 0.05) 100%);
+  border: 1px dashed rgba(59, 130, 246, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.default-pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+  animation: default-dot-pulse 2s infinite ease-in-out;
+  flex: none;
+}
+
+@keyframes default-dot-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.75; }
+  50% { transform: scale(1.3); opacity: 1; }
+}
+
+.default-banner-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.default-banner-desc {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.profile-default-tag {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: 3px;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  white-space: nowrap;
 }
 
 .list-row {
@@ -563,5 +656,74 @@ html {
   outline: none;
   box-shadow: 0 0 0 2px var(--primary-glow);
 }
+
+/* 图钉固定引导横幅 (Pin Guide Banner) */
+.banner-pin-guide {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.12) 0%, rgba(59, 130, 246, 0.08) 100%);
+  border: 1px solid rgba(249, 115, 22, 0.28);
+  box-shadow: 0 2px 10px rgba(249, 115, 22, 0.08);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  position: relative;
+  animation: noteDropdownFade 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pin-guide-badge-wrap {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #ea580c 0%, #f97316 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  margin-top: 1px;
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.35);
+}
+
+.pin-guide-icon {
+  color: #ffffff;
+}
+
+.pin-guide-content {
+  line-height: 1.45;
+}
+
+.pin-guide-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 2px;
+}
+
+.pin-guide-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.pin-code-chip {
+  display: inline-block;
+  padding: 0 3px;
+  font-size: 11px;
+  vertical-align: middle;
+}
+
+.pin-guide-close {
+  color: var(--text-muted);
+  padding: 3px;
+  border-radius: 4px;
+  flex: none;
+  margin-top: -2px;
+  margin-right: -4px;
+}
+
+.pin-guide-close:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 
 

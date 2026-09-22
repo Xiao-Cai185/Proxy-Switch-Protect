@@ -120,6 +120,8 @@ export function SitesTab() {
                           ? 'tag-warning'
                           : site.validationLevel === 'sampling'
                           ? 'tag-primary'
+                          : site.validationLevel === 'time_window'
+                          ? 'tag-primary'
                           : 'tag-ok'
                       }`}
                       style={{ fontSize: '10px' }}
@@ -128,6 +130,8 @@ export function SitesTab() {
                         ? '严格拦截'
                         : site.validationLevel === 'sampling'
                         ? '抽样检测'
+                        : site.validationLevel === 'time_window'
+                        ? '时间画像'
                         : '宽松效率'}
                     </span>
                   ) : (
@@ -137,6 +141,8 @@ export function SitesTab() {
                         ? '严格'
                         : settings?.trafficValidationLevel === 'sampling'
                         ? '抽样'
+                        : settings?.trafficValidationLevel === 'time_window'
+                        ? '时间画像'
                         : '宽松'}
                     </span>
                   )}
@@ -321,9 +327,10 @@ function SiteForm({
           <div className="row" style={{ gap: '14px', flexWrap: 'wrap', marginTop: '6px' }}>
             {[
               { id: 'default' as const, label: '跟随全局设置' },
-              { id: 'relaxed' as const, label: '第三等级：宽松效率模式' },
-              { id: 'sampling' as const, label: '第二等级：抽样检测模式' },
-              { id: 'strict' as const, label: '最高等级：严格拦截模式' },
+              { id: 'time_window' as const, label: '第一等级：基于时间画像策略' },
+              { id: 'relaxed' as const, label: '第二等级：宽松效率模式' },
+              { id: 'sampling' as const, label: '第三等级：抽样检测模式' },
+              { id: 'strict' as const, label: '第四等级：严格拦截模式' },
             ].map((lvl) => (
               <label key={lvl.id} className="row small" style={{ cursor: 'pointer', gap: '5px' }}>
                 <input
@@ -341,9 +348,11 @@ function SiteForm({
               ? '默认继承系统设置中的全局策略。'
               : validationLevel === 'relaxed'
               ? '开屏首检，校验通过后默认信任放行页面内所有后续交互流量，极速直通。'
+              : validationLevel === 'time_window'
+              ? '时间画像策略：固定时间窗口内免除二次首屏验证，由静默周期复检与手动检测兜底。'
               : validationLevel === 'sampling'
               ? '开屏必检，后续页面内请求按频次轻量抽样复检，平滑无感。'
-              : '最高安全等级，开屏、切页、更新每次均实时强校验，子资源未放行前拦截。'}
+              : '最高安全等级，开屏与切页实时强校验，验证通过 5 条页内资源后宽容放行并周期复检。'}
           </span>
         </div>
 

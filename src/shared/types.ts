@@ -82,11 +82,12 @@ export interface CheckerConfig {
 
 /**
  * 流量判定校验策略等级：
- * - 'strict': 最高等级（严格模式），与原版本一致，开屏、切页、更新每次均先锁后检（Fail-Closed），子资源未就绪前拦截
+ * - 'strict': 最高等级（严格模式），开屏与切页实时强校验，单次标签页验证通过特定条数页内资源后宽容放行，并按设定周期静默复检
  * - 'sampling': 第二等级（抽样检测），开屏首检必查，后续页面内交互按频率抽样二次复核，抽检时优先比对有效缓存
  * - 'relaxed': 第三等级（宽松效率模式），只对标签页开屏请求进行校验，校验通过后默认信任并放行后续页面内所有交互流量
+ * - 'time_window': 第四等级（基于时间画像策略），在固定时间窗口内免除第二次首屏 IP 验证，由后台静默周期复检和手动检测做兜底验证
  */
-export type TrafficValidationLevel = 'strict' | 'sampling' | 'relaxed';
+export type TrafficValidationLevel = 'strict' | 'sampling' | 'relaxed' | 'time_window';
 
 /** 全局设置 */
 export interface Settings {
@@ -102,6 +103,21 @@ export interface Settings {
   webrtcProtect: boolean;
   /** 全局流量判定校验策略等级 */
   trafficValidationLevel?: TrafficValidationLevel;
+  /**
+   * 基于时间画像策略的免检时间窗口（分钟）。
+   * 在此窗口期内访问同一站点不再触发第二次首屏加锁验证，默认 60 分钟。
+   */
+  timeWindowMinutes?: number;
+  /**
+   * 严格模式下，单次标签页打开验证放行过的页内资源阈值（条数）。
+   * 验证达到该数量后对后续资源放行，避免网页整体不可用，默认 5 条。
+   */
+  strictToleranceCount?: number;
+  /**
+   * 严格模式下，页内放行后的周期复检间隔（分钟）。
+   * 默认每隔 5 分钟触发一次静默复检，若发现 IP 漂移则执行阻断拦截。
+   */
+  strictRecheckMinutes?: number;
   /**
    * 安全检测通过后，落地页自动返回目标网站的等待延迟时长（秒）。
    * 默认 3 秒。

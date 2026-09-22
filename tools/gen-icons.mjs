@@ -94,7 +94,7 @@ function onCheck(u, v) {
   );
 }
 
-function renderIcon(size) {
+function renderIcon(size, theme = 'blue') {
   const rgba = Buffer.alloc(size * size * 4);
   const SS = 4; // 每像素 4x4 超采样
   for (let py = 0; py < size; py++) {
@@ -116,6 +116,11 @@ function renderIcon(size) {
             r += 255;
             g += 255;
             b += 255;
+          } else if (theme === 'orange') {
+            // 橙色渐变：#F97316 -> #C2410C
+            r += 249 + (194 - 249) * v;
+            g += 115 + (65 - 115) * v;
+            b += 22 + (12 - 22) * v;
           } else {
             // 蓝色渐变：#3B82F6 -> #1D4ED8
             r += 59 + (29 - 59) * v;
@@ -139,6 +144,7 @@ function renderIcon(size) {
 const outDir = join(root, 'public', 'icons');
 mkdirSync(outDir, { recursive: true });
 for (const size of [16, 32, 48, 128]) {
-  writeFileSync(join(outDir, `icon${size}.png`), renderIcon(size));
-  console.log(`generated icon${size}.png`);
+  writeFileSync(join(outDir, `icon${size}.png`), renderIcon(size, 'blue'));
+  writeFileSync(join(outDir, `icon${size}-orange.png`), renderIcon(size, 'orange'));
+  console.log(`generated icon${size}.png and icon${size}-orange.png`);
 }

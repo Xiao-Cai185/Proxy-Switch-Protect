@@ -9,14 +9,17 @@ import {
   Lock,
   PauseCircle,
   PenLine,
+  Pin,
   RotateCcw,
   Server,
   Settings as SettingsIcon,
   Shield,
   ShieldCheck,
   Sparkles,
+  X,
+  Zap,
 } from 'lucide-react';
-import { BUILTIN_PROFILES } from '../../shared/constants';
+import { BUILTIN_PROFILES, getPolicyMeta } from '../../shared/constants';
 import { urlMatchesDomain } from '../../shared/matchers';
 import { sendCmd, type LevelOfControlInfo } from '../../shared/messages';
 import { loadSites, saveSites } from '../../shared/storage';
@@ -41,6 +44,23 @@ import {
   useSuggestions,
 } from '../ui/hooks';
 
+function openOptionsPage(hash = 'profiles') {
+  const targetUrl = chrome.runtime.getURL(`options.html#${hash}`);
+  chrome.tabs.query({ url: chrome.runtime.getURL('options.html*') }, (tabs) => {
+    if (tabs && tabs.length > 0) {
+      const tab = tabs[0];
+      if (tab.id) {
+        chrome.tabs.update(tab.id, { active: true, url: targetUrl });
+        if (tab.windowId) {
+          chrome.windows.update(tab.windowId, { focused: true });
+        }
+        return;
+      }
+    }
+    chrome.tabs.create({ url: targetUrl });
+  });
+}
+
 export function App() {
   const profiles = useProfiles();
   const activeId = useActiveProfileId();
@@ -54,11 +74,27 @@ export function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [control, setControl] = useState<LevelOfControlInfo | null>(null);
+  const [showPinGuide, setShowPinGuide] = useState(() => {
+    try {
+      return localStorage.getItem('proxy_protect_hide_pin_guide') !== 'true';
+    } catch {
+      return true;
+    }
+  });
   const [currentTab, setCurrentTab] = useState<{
     url: string;
     domain: string;
     title: string;
   } | null>(null);
+
+  const dismissPinGuide = () => {
+    setShowPinGuide(false);
+    try {
+      localStorage.setItem('proxy_protect_hide_pin_guide', 'true');
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     void sendCmd<LevelOfControlInfo>({ type: 'getLevelOfControl' })
@@ -120,21 +156,42 @@ export function App() {
     <div className="popup" style={popupThemeStyle}>
       {/* 头部品牌栏 */}
       <header className="popup-header">
-        <div className="row" style={{ gap: '10px' }}>
+        <div className="row popup-header-brand" style={{ gap: '8px', minWidth: 0, flex: '1 1 auto' }}>
           <div className="popup-logo-badge">
             <ShieldCheck size={18} className="popup-logo-icon" />
           </div>
-          <div>
-            <div className="row" style={{ gap: '6px' }}>
+          <div style={{ minWidth: 0, overflow: 'hidden' }}>
+            <div className="row" style={{ gap: '6px', alignItems: 'center' }}>
               <h1 className="popup-title">Proxy Protect</h1>
               <span className="popup-version">
                 v{chrome.runtime.getManifest().version}
               </span>
             </div>
-            <div className="popup-sub muted small">智能代理切换 · 域名落地 IP 守护</div>
+            <div className="popup-sub muted small truncate" title="智能代理切换 · 域名落地 IP 守护">
+              智能代理 · 落地 IP 守护
+            </div>
           </div>
         </div>
-        <div className="row popup-header-actions">
+        <div className="row popup-header-actions" style={{ gap: '5px' }}>
+          {(() => {
+            const curPolicy = getPolicyMeta(settings?.trafficValidationLevel);
+            return (
+              <span
+                className="chip chip-policy"
+                style={{
+                  cursor: 'pointer',
+                  borderColor: `${curPolicy.color}50`,
+                  background: `${curPolicy.color}15`,
+                  color: curPolicy.color,
+                }}
+                title={`当前生效流量判定策略：第 ${curPolicy.level} 等级 · ${curPolicy.name}\n${curPolicy.desc}\n点击前往「全局设置」自行设置等级`}
+                onClick={() => openOptionsPage('settings')}
+              >
+                <Zap size={11} style={{ color: curPolicy.color, flex: 'none' }} />
+                <span>L{curPolicy.level} {curPolicy.shortName}</span>
+              </span>
+            );
+          })()}
           <span
             className={`chip ${webrtcOn ? 'chip-ok' : 'chip-muted'}`}
             title={
@@ -143,18 +200,43 @@ export function App() {
                 : 'WebRTC Protect 已关闭'
             }
           >
-            <Shield size={11} />
-            <span>WebRTC {webrtcOn ? '开启' : '关闭'}</span>
+            <Shield size={11} style={{ flex: 'none' }} />
+            <span>WebRTC{webrtcOn ? '' : ' 关'}</span>
           </span>
           <button
-            className="btn btn-ghost btn-icon"
-            title="打开插件控制中心"
-            onClick={() => chrome.runtime.openOptionsPage()}
+            className="btn btn-ghost btn-icon header-setting-btn"
+            title="打开控制中心（代理档案）"
+            onClick={() => openOptionsPage('profiles')}
           >
-            <SettingsIcon size={16} />
+            <SettingsIcon size={15} />
           </button>
         </div>
       </header>
+
+      {/* 浏览器图钉固定引导卡片 */}
+      {showPinGuide && (
+        <div className="banner banner-pin-guide">
+          <div className="pin-guide-badge-wrap">
+            <Pin size={15} className="pin-guide-icon" />
+          </div>
+          <div className="grow small pin-guide-content">
+            <div className="pin-guide-title">
+              建议将 <b>Proxy Protect</b> 固定到工具栏
+            </div>
+            <div className="pin-guide-desc">
+              点击浏览器右上角拼图图标 <span className="pin-code-chip">🧩</span>，找到本插件并点击图钉 <span className="pin-code-chip">📌</span> 固定，方便随时监控落地 IP 与切换节点。
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon pin-guide-close"
+            title="我知道了，不再提示"
+            onClick={dismissPinGuide}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* 控制权警告横幅 */}
       {control && !control.controlled && (
@@ -189,6 +271,7 @@ export function App() {
         checkState={checkState}
         activeId={activeId}
         profiles={profiles}
+        settings={settings}
       />
 
       {/* 智能习惯推荐卡片 */}
@@ -239,7 +322,23 @@ export function App() {
             {(profiles ?? []).length + BUILTIN_PROFILES.length} 个节点
           </span>
         </div>
-        <div className="card list-card">
+        <div className={`card list-card ${!activeId ? 'list-card-default-mode' : ''}`}>
+          {!activeId && (
+            <div className="list-default-banner">
+              <div className="row-between" style={{ width: '100%' }}>
+                <div className="row" style={{ gap: '6px' }}>
+                  <span className="default-pulse-dot" />
+                  <span className="default-banner-title">当前处于缺省托管状态</span>
+                </div>
+                <span className="tag tag-ok" style={{ fontSize: '10px' }}>
+                  出口监测正常
+                </span>
+              </div>
+              <div className="default-banner-desc">
+                尚未指定代理节点，当前网络由<b>系统默认环境或外部代理软件</b>（如 Clash、v2rayN）托管。点击下方任意节点可立即接管切换。
+              </div>
+            </div>
+          )}
           {BUILTIN_PROFILES.map((b) => (
             <ProfileRow
               key={b.id}
@@ -248,6 +347,7 @@ export function App() {
               color={b.id === 'direct' ? '#10b981' : '#64748b'}
               lastCheck={profileChecks[b.id]}
               active={activeId === b.id}
+              isDefaultEnv={!activeId}
               busy={busy === `switch:${b.id}`}
               onClick={() => switchTo(b.id)}
             />
@@ -417,6 +517,7 @@ function ProfileRow(props: {
   authed?: boolean;
   lastCheck?: ProfileCheckResult;
   active: boolean;
+  isDefaultEnv?: boolean;
   busy: boolean;
   onClick: () => void;
 }) {
@@ -506,6 +607,10 @@ function ProfileRow(props: {
         >
           <Check size={14} />
         </div>
+      ) : props.isDefaultEnv ? (
+        <span className="profile-default-tag" title="缺省基准环境（点击可切换主动接管）">
+          缺省环境
+        </span>
       ) : null}
     </button>
   );
@@ -518,8 +623,9 @@ function CurrentSiteGuardCard(props: {
   checkState: ReturnType<typeof useCheckState>;
   activeId: string | null | undefined;
   profiles: ProxyProfile[] | undefined;
+  settings?: ReturnType<typeof useSettings>;
 }) {
-  const { currentTab, sites, guardStates, checkState, activeId, profiles } = props;
+  const { currentTab, sites, guardStates, checkState, activeId, profiles, settings } = props;
   const [strictMode, setStrictMode] = useState<'country' | 'subnet' | 'ip'>('country');
   const [policyLevel, setPolicyLevel] = useState<TrafficValidationLevel | 'default'>('default');
   const [showNoteForm, setShowNoteForm] = useState(false);
@@ -539,7 +645,9 @@ function CurrentSiteGuardCard(props: {
       ? '直连模式'
       : activeId === 'system'
       ? '系统代理'
-      : profiles?.find((p) => p.id === activeId)?.name ?? '自定义节点';
+      : activeId
+      ? profiles?.find((p) => p.id === activeId)?.name ?? '自定义节点'
+      : '系统/外部托管 (缺省)';
 
   const checkResult = checkState?.status === 'ok' ? checkState.result : undefined;
 
@@ -617,15 +725,37 @@ function CurrentSiteGuardCard(props: {
                 ? '临时放行'
                 : '拦截保护中'}
             </span>
-            <span className="tag tag-muted" style={{ fontSize: '10px' }}>
-              {matchingSite.validationLevel === 'strict'
-                ? '严格'
-                : matchingSite.validationLevel === 'sampling'
-                ? '抽样'
-                : matchingSite.validationLevel === 'relaxed'
-                ? '宽松'
-                : '全局策略'}
-            </span>
+            {(() => {
+              const isCustom =
+                matchingSite.validationLevel && matchingSite.validationLevel !== 'default';
+              const effectiveLevel: TrafficValidationLevel = isCustom
+                ? (matchingSite.validationLevel as TrafficValidationLevel)
+                : settings?.trafficValidationLevel || 'relaxed';
+              const sp = getPolicyMeta(effectiveLevel);
+              return (
+                <span
+                  className="tag"
+                  style={{
+                    fontSize: '10px',
+                    borderColor: `${sp.color}40`,
+                    background: `${sp.color}15`,
+                    color: sp.color,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                    fontWeight: 500,
+                  }}
+                  title={`当前站点防护策略：第 ${sp.level} 等级 · ${sp.name}（${
+                    isCustom ? '站点独立指定' : '跟随全局策略'
+                  }）\n点击前往控制中心调整`}
+                  onClick={() => openOptionsPage(isCustom ? 'sites' : 'settings')}
+                >
+                  <Zap size={9} style={{ color: sp.color, flex: 'none' }} />
+                  <span>L{sp.level} {sp.shortName}</span>
+                </span>
+              );
+            })()}
           </div>
         </div>
 
@@ -878,14 +1008,16 @@ function CurrentSiteGuardCard(props: {
               <span className="muted">流量策略：</span>
               <div className="row" style={{ gap: '4px' }}>
                 {[
-                  { id: 'default' as const, label: '全局' },
-                  { id: 'relaxed' as const, label: '宽松' },
-                  { id: 'sampling' as const, label: '抽样' },
-                  { id: 'strict' as const, label: '严格' },
+                  { id: 'default' as const, label: '全局', title: '跟随全局默认设置' },
+                  { id: 'time_window' as const, label: '时间', title: '基于时间画像策略：固定时间窗口内免除二次首屏验证' },
+                  { id: 'relaxed' as const, label: '宽松', title: '宽松效率模式：开屏首检，后续直接放行' },
+                  { id: 'sampling' as const, label: '抽样', title: '抽样检测模式：平滑抽样二次复核' },
+                  { id: 'strict' as const, label: '严格', title: '严格拦截模式：实时强校验与宽容放行' },
                 ].map((lvl) => (
                   <button
                     key={lvl.id}
                     type="button"
+                    title={lvl.title}
                     className={`btn btn-xs ${policyLevel === lvl.id ? 'btn-primary' : ''}`}
                     style={{
                       padding: '2px 6px',

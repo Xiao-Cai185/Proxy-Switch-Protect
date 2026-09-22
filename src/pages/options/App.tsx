@@ -29,7 +29,20 @@ export function App() {
   );
 
   useEffect(() => {
-    location.hash = tab;
+    const handleHash = () => {
+      const h = location.hash.slice(1) as TabId;
+      if (TABS.some((t) => t.id === h)) {
+        setTab(h);
+      }
+    };
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  useEffect(() => {
+    if (location.hash.slice(1) !== tab) {
+      location.hash = tab;
+    }
   }, [tab]);
 
   return (
