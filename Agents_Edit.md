@@ -1855,6 +1855,32 @@ Popup 弹窗右上角已具备直观的齿轮设置图标按钮（`<SettingsIcon
 - **构建并导出 ZIP**：执行 `npm run build`，成功完成前端 MPA 编译并在 `dist/zip/` 生成 `proxy-switch-protect-3.5.1.zip`（28 个文件，原始 518.6 KB，压缩至 214.6 KB，体积缩减 58.6%）；
 - **ZIP 解压结构验证**：使用 `tar -tf dist/zip/proxy-switch-protect-3.5.1.zip` 验证包内层级，`manifest.json` 与各入口 HTML 均在根目录，无多余冗余路径，解压即可直接导入 Chrome/Edge 浏览器。
 
+---
+
+### [2026-09-22] 根目录下补充开源许可证 (LICENSE - MIT)
+
+#### 1. 需求背景与目标
+用户（彩彩）反馈要求：
+- 在项目根目录下补充开源协议文件 `LICENSE`，协议内容采用标准 MIT 许可证；
+- 与 `README.md` 中已声明的“本项目基于 MIT License 协议开源”保持对应与合规。
+
+#### 2. 技术设计与详细实现
+1. **创建根目录 `LICENSE` 文件**：
+   - 写入国际通用的标准 MIT License 条款正文；
+   - 声明版权归属：`Copyright (c) 2026 Xiao-Cai185`；
+   - 赋予使用者不受限制地使用、修改、合并、发布、分发及销售副本的合法权利。
+2. **规范化 `package.json` 元数据**：
+   - 补充 `"license": "MIT"` 声明字段。
+
+#### 3. 修改的文件清单
+- **`LICENSE`** [NEW]：标准 MIT License 许可证文本；
+- **`package.json`** [MODIFY]：新增 `"license": "MIT"` 属性；
+- **`Agents_Edit.md`** [MODIFY]：记录开源许可证补充细节。
+
+#### 4. 验证与构建测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，**0 错误、0 警告**；
+- **生产构建与测试**：执行 `npm run build`，编译与自动打包正常完成。
+
 
 
 

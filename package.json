@@ -3,6 +3,7 @@
   "version": "3.5.1",
   "private": true,
   "type": "module",
+  "license": "MIT",
   "description": "浏览器代理切换与域名落地 IP 守护插件",
   "scripts": {
     "dev": "vite build --watch --mode development",
