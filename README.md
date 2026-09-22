@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-v3.5.1-emerald?style=flat-square)
+![Version](https://img.shields.io/badge/version-v3.5.2-emerald?style=flat-square)
 ![Manifest](https://img.shields.io/badge/Manifest-V3-blue?style=flat-square)
 ![Chrome](https://img.shields.io/badge/Chrome%20%2F%20Edge-116%2B-green?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-orange?style=flat-square)
@@ -146,14 +146,25 @@
 
 ---
 
-## 🛠️ 安装与快速开始
+## 🛠️ 安装与使用方式
 
-### 方式一：从源码构建并安装
+### 方式一：直接下载发布包安装（推荐，开箱即用无需配置开发环境）
+
+1. 前往 GitHub [Releases](https://github.com/Xiao-Cai185/Proxy-Switch-Protect/releases) 页面，在最新发布版本（Assets 附件）中下载已编译好的扩展压缩包 `proxy-switch-protect-x.x.x.zip`；
+2. 将下载的 ZIP 压缩包解压到本地任意常用目录（例如 `D:\Software\Proxy-Switch-Protect`，解压后目录内直接包含 `manifest.json`、`background.js` 等完整扩展文件）；
+3. 打开基于 Chromium 内核的现代浏览器（Chrome、Edge、Brave、360 极速浏览器等），在地址栏访问扩展管理页：
+   - **Chrome 浏览器**：`chrome://extensions/`
+   - **Edge 浏览器**：`edge://extensions/`
+4. 在页面右上角开启 **「开发者模式」** 开关；
+5. 点击左上角的 **「加载已解压的扩展程序」** 按钮，选择刚才解压出来的目录；
+6. 安装成功！点击浏览器工具栏右侧的“扩展 / 拼图”图标，将 **Proxy Switch Protect** 固定在工具栏以便随时一键呼出与查看网络守护状态。
+
+### 方式二：从源码本地构建并安装
 
 1. **克隆项目到本地**：
 
    ```bash
-   git clone https://github.com/your-username/Proxy-Switch-Protect.git
+   git clone https://github.com/Xiao-Cai185/Proxy-Switch-Protect.git
    cd Proxy-Switch-Protect
    ```
 
@@ -164,18 +175,18 @@
    npm run build
    ```
 
-   > 编译成功后将在根目录生成 `dist/` 文件夹。
+   > 编译成功后将在根目录生成 `dist/` 编译产物文件夹，同时在 `dist/zip/` 目录下自动导出可直接发布的 `proxy-switch-protect-x.x.x.zip` 压缩包。
 
 3. **加载到 Chrome / Edge 浏览器**：
-   - 打开浏览器访问 `chrome://extensions/`（Edge 访问 `edge://extensions/`）；
-   - 在右上角开启「开发者模式」；
-   - 点击「加载已解压的扩展程序」，选择项目根目录下的 `dist` 目录；
-   - 点击浏览器扩展图标旁边的“图钉”，将 Proxy Switch Protect 固定在浏览器工具栏。
+   - 打开浏览器扩展管理页面并开启「开发者模式」；
+   - 点击「加载已解压的扩展程序」，选择项目根目录下的 `dist` 目录即可完成加载。
 
-### 开发模式与命令
+### 开发调试与脚本命令
 
 ```bash
-npm run dev        # 启动实时监听构建（开发热更模式）
+npm run dev        # 启动实时监听构建（开发热更新模式）
+npm run build      # 执行静态类型检查、生产构建并自动导出分发 ZIP 压缩包
+npm run pack       # 独立对当前 dist/ 产物进行 ZIP 打包导出
 npm test           # 执行 Vitest 单元测试集（49 项用例）
 npm run typecheck  # TypeScript 严格静态类型检查
 npm run icons      # 自动生成 16/32/48/128 多尺寸高清扩展图标
