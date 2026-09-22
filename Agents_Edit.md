@@ -1642,6 +1642,57 @@ Popup 弹窗右上角已具备直观的齿轮设置图标按钮（`<SettingsIcon
 - **`README.md`**：全新编写项目综合图文介绍文档；
 - **`Agents_Edit.md`**：记录本次文档建设与归档。
 
+---
+
+### [2026-09-22] 项目正式更名为 Proxy Switch Protect（全端展示与文档统一更名）
+
+#### 1. 需求说明
+根据用户（彩彩）需求：
+项目正式更名为 **Proxy Switch Protect**，同步更新 `README.md` 中的所有名称及全项目前端界面的全部展示名称、窗口标题与扩展配置。
+
+#### 2. 技术设计与详细实现
+1. **前端页面展示名称更新**：
+   - **Popup 弹窗 (`src/pages/popup/App.tsx` & `popup.css`)**：
+     - 头部品牌标题更新为 `Proxy Switch Protect`，优化 `.popup-title` 样式（`white-space: nowrap; font-size: 14.5px;`），保障在 460px 宽度下与右侧三态徽章胶囊紧凑并列无折行；
+     - 浏览器图钉固定引导卡片提示文案更新为“建议将 **Proxy Switch Protect** 固定到工具栏”；
+   - **控制中心 (`src/pages/options/App.tsx`)**：
+     - 头部大标题更新为 `Proxy Switch Protect 控制中心`；
+     - 页脚版权与标准声明更新为 `Proxy Switch Protect · 守护您的海外敏感账号与代理网络安全 · Manifest V3 Standard`；
+   - **阻断提示页 (`src/pages/blocked/App.tsx`)**：
+     - 阻断主标题更新为 `访问请求已被 Proxy Switch Protect 安全阻断`；
+2. **HTML 页面 Title 与扩展清单更新**：
+   - `popup.html`：更新网页标题为 `<title>Proxy Switch Protect</title>`；
+   - `options.html`：更新网页标题为 `<title>Proxy Switch Protect 控制中心</title>`；
+   - `blocked.html`：更新网页标题为 `<title>访问已被 Proxy Switch Protect 拦截</title>`；
+   - `public/manifest.json`：更新扩展名称为 `Proxy Switch Protect - 代理切换与域名守护`，`default_title` 为 `Proxy Switch Protect`；
+3. **后台通知与包配置更新**：
+   - `src/background/guard-engine.ts`：更新锁定系统通知标题为 `Proxy Switch Protect 已锁定站点`；
+   - `src/background/habit-learner.ts`：更新建议系统通知标题为 `Proxy Switch Protect 绑定建议`；
+   - `src/pages/options/tabs/SettingsTab.tsx`：导出配置备份默认文件名更新为 `proxy-switch-protect-backup-${stamp}.json`；
+   - `package.json` & `package-lock.json`：更新包名称为 `proxy-switch-protect`；
+   - `docs/使用说明.md` & `docs/隐私政策.md`：标题同步更名为 `Proxy Switch Protect`；
+4. **README.md 全量更名同步**：
+   - 主标题、四级策略介绍、习惯统计说明、源码克隆与安装指引等所有位置全量同步更名为 `Proxy Switch Protect`。
+
+#### 3. 修改的文件清单
+- **`src/pages/popup/App.tsx`** & **`src/pages/popup/popup.css`**：更新弹窗标题及引导文案，防挤压排版优化；
+- **`src/pages/options/App.tsx`**：更新控制中心标题与页脚说明；
+- **`src/pages/blocked/App.tsx`**：更新安全阻断主标题文案；
+- **`popup.html`**、**`options.html`**、**`blocked.html`**：更新各入口页面 HTML 标题；
+- **`public/manifest.json`**：更新扩展名称与 action title；
+- **`src/background/guard-engine.ts`** & **`src/background/habit-learner.ts`**：更新系统推送通知标题；
+- **`src/pages/options/tabs/SettingsTab.tsx`**：更新导出备份默认前缀；
+- **`package.json`** & **`package-lock.json`**：更新工程名称为 `proxy-switch-protect`；
+- **`docs/使用说明.md`** & **`docs/隐私政策.md`**：文档标题同步更新；
+- **`README.md`**：全量更名与仓库命令更新；
+- **`Agents_Edit.md`**：记录本次正式更名全景。
+
+#### 4. 验证与构建测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，**0 错误、0 警告**；
+- **单元测试集 (Vitest)**：执行 `npm test`，全套 6 个测试套件、49 项测试 **100% 全部通过**；
+- **生产环境打包 (Vite)**：执行 `npm run build`，耗时 1.00s 顺利完成无损打包输出至 `dist/`，确认 `dist/manifest.json` 与各打包 html 标题均同步为 `Proxy Switch Protect`。
+
+
 
 
 

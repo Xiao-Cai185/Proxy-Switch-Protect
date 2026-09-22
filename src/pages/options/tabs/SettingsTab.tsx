@@ -126,7 +126,7 @@ export function SettingsTab() {
     const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
       d.getDate(),
     ).padStart(2, '0')}`;
-    downloadText(`proxy-protect-backup-${stamp}.json`, JSON.stringify(bundle, null, 2));
+    downloadText(`proxy-switch-protect-backup-${stamp}.json`, JSON.stringify(bundle, null, 2));
   };
 
   const importData = async (file: File) => {

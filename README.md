@@ -1,4 +1,4 @@
-# Proxy Protect - 智能代理切换与域名落地 IP 守护
+# Proxy Switch Protect - 智能代理切换与域名落地 IP 守护
 
 <div align="center">
 
@@ -80,7 +80,7 @@
 
 ### 4. ⚡ 四级流量判定校验策略 (Traffic Validation Policy)
 
-基于安全性与访问效率的不同权衡，Proxy Protect 独创了 1~4 等级平滑滑动调控体系：
+基于安全性与访问效率的不同权衡，Proxy Switch Protect 独创了 1~4 等级平滑滑动调控体系：
 
 #### 🟢 第 1 等级：基于时间画像策略 (Time Window)
 
@@ -118,7 +118,7 @@
 
 ### 5. 🧠 统计建议与智能绑定 (Habits & Smart Suggestions)
 
-无需手动繁琐配置，Proxy Protect 在本地后台智能学习用户的网络访问习惯。
+无需手动繁琐配置，Proxy Switch Protect 在本地后台智能学习用户的网络访问习惯。
 
 <div align="center">
   <img src="docs/img/habits.png" alt="统计建议和智能绑定页" width="850" />
@@ -153,8 +153,8 @@
 1. **克隆项目到本地**：
 
    ```bash
-   git clone https://github.com/your-username/Proxy-Protect.git
-   cd Proxy-Protect
+   git clone https://github.com/your-username/Proxy-Switch-Protect.git
+   cd Proxy-Switch-Protect
    ```
 
 2. **安装依赖并编译打包**：
@@ -170,7 +170,7 @@
    - 打开浏览器访问 `chrome://extensions/`（Edge 访问 `edge://extensions/`）；
    - 在右上角开启「开发者模式」；
    - 点击「加载已解压的扩展程序」，选择项目根目录下的 `dist` 目录；
-   - 点击浏览器扩展图标旁边的“图钉”，将 Proxy Protect 固定在浏览器工具栏。
+   - 点击浏览器扩展图标旁边的“图钉”，将 Proxy Switch Protect 固定在浏览器工具栏。
 
 ### 开发模式与命令
 

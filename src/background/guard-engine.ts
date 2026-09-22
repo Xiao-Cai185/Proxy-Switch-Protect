@@ -253,7 +253,7 @@ function notifyLocked(site: ProtectedSite, cc?: string): void {
     chrome.notifications.create(`locked:${site.id}:${Date.now()}`, {
       type: 'basic',
       iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-      title: 'Proxy Protect 已锁定站点',
+      title: 'Proxy Switch Protect 已锁定站点',
       message: cc
         ? `${site.domainPattern}：当前落地 ${countryName(cc)}（${cc}）与期望不符，已中断访问`
         : `${site.domainPattern}：无法确认落地 IP，已中断访问`,

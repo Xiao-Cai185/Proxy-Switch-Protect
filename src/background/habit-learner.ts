@@ -102,7 +102,7 @@ async function maybeSuggest(domain: string, settings: Settings, sampleIp?: strin
       chrome.notifications.create(`suggest:${domain}:${res.countryCode}`, {
         type: 'basic',
         iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-        title: 'Proxy Protect 绑定建议',
+        title: 'Proxy Switch Protect 绑定建议',
         message: `最近 ${res.days} 天访问 ${domain} 均使用 ${countryName(res.countryCode)}（${res.countryCode}）落地，建议创建守护绑定。`,
         buttons: [{ title: '立即绑定' }, { title: '忽略' }],
         priority: 1,

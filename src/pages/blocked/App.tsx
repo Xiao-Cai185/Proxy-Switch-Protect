@@ -371,7 +371,7 @@ export function App() {
             ? `安全校验通过，${countdown > 0 ? `${countdown} 秒后` : ''}自动返回…`
             : validating
               ? '正在安全核验当前标签页网络环境…'
-              : '访问请求已被 Proxy Protect 安全阻断'}
+              : '访问请求已被 Proxy Switch Protect 安全阻断'}
         </h1>
 
         {redirecting && (

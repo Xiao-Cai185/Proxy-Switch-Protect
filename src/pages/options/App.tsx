@@ -55,7 +55,7 @@ export function App() {
           </div>
           <div>
             <div className="row" style={{ gap: '8px' }}>
-              <h1 className="options-title">Proxy Protect 控制中心</h1>
+              <h1 className="options-title">Proxy Switch Protect 控制中心</h1>
               <span className="tag tag-primary mono" style={{ fontSize: '11px' }}>
                 v{chrome.runtime.getManifest().version}
               </span>
@@ -96,7 +96,7 @@ export function App() {
 
       {/* 底部信息 */}
       <footer className="options-footer muted small">
-        Proxy Protect · 守护您的海外敏感账号与代理网络安全 · Manifest V3 Standard
+        Proxy Switch Protect · 守护您的海外敏感账号与代理网络安全 · Manifest V3 Standard
       </footer>
     </div>
   );

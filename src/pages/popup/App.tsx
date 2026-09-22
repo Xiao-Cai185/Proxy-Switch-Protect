@@ -162,7 +162,7 @@ export function App() {
           </div>
           <div style={{ minWidth: 0, overflow: 'hidden' }}>
             <div className="row" style={{ gap: '6px', alignItems: 'center' }}>
-              <h1 className="popup-title">Proxy Protect</h1>
+              <h1 className="popup-title">Proxy Switch Protect</h1>
               <span className="popup-version">
                 v{chrome.runtime.getManifest().version}
               </span>
@@ -221,7 +221,7 @@ export function App() {
           </div>
           <div className="grow small pin-guide-content">
             <div className="pin-guide-title">
-              建议将 <b>Proxy Protect</b> 固定到工具栏
+              建议将 <b>Proxy Switch Protect</b> 固定到工具栏
             </div>
             <div className="pin-guide-desc">
               点击浏览器右上角拼图图标 <span className="pin-code-chip">🧩</span>，找到本插件并点击图钉 <span className="pin-code-chip">📌</span> 固定，方便随时监控落地 IP 与切换节点。
