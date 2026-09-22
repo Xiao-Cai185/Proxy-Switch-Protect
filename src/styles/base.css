@@ -285,6 +285,13 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px var(--primary-glow);
 }
 
+input.input-error,
+select.input-error,
+textarea.input-error {
+  border-color: var(--danger) !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25) !important;
+}
+
 textarea {
   resize: vertical;
   min-height: 72px;

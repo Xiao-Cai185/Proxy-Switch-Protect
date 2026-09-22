@@ -6,7 +6,8 @@
   "description": "浏览器代理切换与域名落地 IP 守护插件",
   "scripts": {
     "dev": "vite build --watch --mode development",
-    "build": "npm run typecheck && vite build",
+    "build": "npm run typecheck && vite build && node tools/pack-zip.mjs",
+    "pack": "node tools/pack-zip.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "icons": "node tools/gen-icons.mjs"

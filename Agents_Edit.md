@@ -1692,6 +1692,171 @@ Popup 弹窗右上角已具备直观的齿轮设置图标按钮（`<SettingsIcon
 - **单元测试集 (Vitest)**：执行 `npm test`，全套 6 个测试套件、49 项测试 **100% 全部通过**；
 - **生产环境打包 (Vite)**：执行 `npm run build`，耗时 1.00s 顺利完成无损打包输出至 `dist/`，确认 `dist/manifest.json` 与各打包 html 标题均同步为 `Proxy Switch Protect`。
 
+---
+
+### [2026-09-22] 修复拦截页放行延迟倒计时失效 Bug 与设置表单数字输入校验重构（支持删除重填、失焦校验标红、顶部 3 秒保存成功 Toast）
+
+#### 1. 需求背景与问题根因
+用户（彩彩）反馈指正：
+1. **安全检测通过后自动返回原网站延迟（秒）设置后没有变化（固定 1 秒立即跳走）**：
+   - **根本成因排查**：在 `src/pages/blocked/App.tsx` 中，首屏核验 `verifyAndAllowTab` 返回 `res.pass === true` 时，直接硬编码执行了 `location.replace(from)`，直接绕过了 `countdown` 倒计时逻辑；导致哪怕用户在设置中将延迟改为 5 秒或 10 秒，拦截页也会在开屏核验成功的瞬间（~1 秒）闪退跳转，用户设定的倒计时完全没有机会触发。
+2. **设置表单中的数值无法彻底删除干净再重新输入**：
+   - **根本成因排查**：原有数字输入框直接受控绑定 `onChange` 并通过 `Number(inputValue(e)) || fallback` 强制兜底，用户在输入框按退格键清空为 `""` 的瞬间，立即被 `|| fallback` 重置恢复为默认数值，导致用户无法清空重填。
+3. **交互规范重构**：
+   - 允许用户自由删除清空；
+   - 在失焦（`onBlur`）或按 Enter 键时执行判定：数值合法则提交保存，数值异常（为空、非数字、超出 min/max 范围）则标红输入框并在下方展示具体的红色错误说明；
+   - 正常保存设置时，在页面顶部弹出精美的 3 秒“配置保存成功”消息框（Toast），自动淡出消失。
+
+#### 2. 技术设计与详细实现
+1. **拦截页放行倒计时逻辑彻底修复 (`src/pages/blocked/App.tsx`)**：
+   - 移除开屏通过后的硬跳转 `location.replace(from)`；
+   - 在开屏核验放行及后台状态恢复（自愈切换/重新检测/临时放行）时，均通过 `await loadSettings()` 实时读取存储中最新的 `passRedirectDelaySec`（默认 3 秒）；
+   - 触发 `setCountdown(delay)` 与 `setRedirecting(true)`，平滑激活倒计时效果，顶部主标题动态展示“安全校验通过，N 秒后自动返回…”，配合“立即进入”按钮，倒计时归零时平滑返回原网站；彻底解决参数被绕过的问题。
+2. **封装通用受控校验输入组件 `ValidatedNumberInput` (`src/pages/options/tabs/SettingsTab.tsx`)**：
+   - 内部维护独立 `draft` 草稿字符串状态，允许用户任意清空、退格删除；
+   - 监听 `onBlur` 与 `onKeyDown(Enter)` 触发 `validateAndSave()`：
+     - 若为空：提示“数值不能为空，请输入 min ~ max 之间的有效数字”；
+     - 若为非有效数字：提示“请输入合规的有效数字”；
+     - 若超出范围：提示“数值超出范围，请输入 min ~ max 之间的数字”；
+     - 若校验不通过，输入框添加 `.input-error` 类名标红并显示错误提示行；
+     - 若校验通过，更新草稿并触发保存与成功提示。
+   - 全面替换全局设置面板中全部 9 处数字配置项：单源检测超时时间、安全检测通过后返回原网站延迟、自定义复检分钟数、严格模式宽容放行数、严格模式复检间隔、时间画像免检窗口、滑动窗口天数、最少访问天数、主导国家占比。
+3. **全局 3 秒保存成功 Toast 消息框 (`SettingsTab.tsx` & `options.css`)**：
+   - 在 `SettingsTab.tsx` 中使用 `useRef` + `setTimeout` 封装防抖 `triggerToast(msg)`，确保每次保存均稳定展示 3 秒；
+   - 在 `options.css` 中设计现代化顶端悬浮胶囊 `.settings-toast-banner`（居中吸顶、玻璃拟态模糊滤镜、翡翠绿辉光高光、弹入动画），视觉效果极佳。
+4. **全局表单错误态样式增强 (`src/styles/base.css`)**：
+   - 增加 `.input-error` 规则：强制赋予危险红边框与高发光光晕（`border-color: var(--danger) !important; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25) !important;`）。
+
+#### 3. 修改的文件清单
+- **`src/pages/blocked/App.tsx`**：修复放行延迟绕过问题，统一通过倒计时与实时配置跳转；
+- **`src/styles/base.css`**：补充 `.input-error` 表单报错红框与光晕；
+- **`src/pages/options/options.css`**：新增 `.settings-toast-banner` 顶部 3 秒悬浮消息框样式；
+- **`src/pages/options/tabs/SettingsTab.tsx`**：实现 `ValidatedNumberInput`，重构全部 9 项数字表单校验与失焦保存，集成顶部 3 秒 Toast 消息框；
+- **`Agents_Edit.md`**：记录本次 Bug 修复与交互升级细节。
+
+#### 4. 验证与构建测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，**0 错误、0 警告**；
+- **单元测试集 (Vitest)**：执行 `npm test`，全套 6 个测试套件、49 项测试 **100% 全部通过**；
+- **生产环境打包 (Vite)**：执行 `npm run build`，耗时 588ms 顺利完成无损打包输出至 `dist/`。
+
+---
+
+### [2026-09-22] 域名安全守护规则流量判定策略等级滑块重构与继承全局开关联动
+
+#### 1. 需求背景与功能目标
+用户（彩彩）反馈要求：
+1. **域名安全守护规则校验策略优化成滑块**：在「域名安全守护规则」新建/编辑表单中，将原本传统的单选框（Radio Buttons）重构为现代化的 4 档极光滑块（支持 1~4 档平滑滑动与点击刻度点直达）。
+2. **每条规则的“继承全局策略”做成独立开关**：
+   - 当开关处于**开启（继承全局）**状态时：规则策略完全跟随全局设置，滑块呈现置灰锁定态，手柄与填充条自动对齐全局当前的策略等级，并清晰提示跟随全局的等级名称与解读，禁止拖拽修改。
+   - 只有当用户将该开关**关闭（独立定制）**之后，才能启用滑块，支持为该特定域名单独自由滑动定制第 1~4 档策略等级。
+
+#### 2. 技术设计与详细实现
+1. **封装高复用滑块组件 `PolicyLevelSlider` (`src/pages/options/components/PolicyLevelSlider.tsx`)**：
+   - 抽象出标准 Props：`value`（当前策略 ID）、`onChange`（档位切换回调）、`disabled`（锁定置灰态）、`disabledHint`（禁用提示文案）、`showDetails`（是否展示策略详情卡片）。
+   - 保持与设置页完全一致的视觉体验：
+     - 等级专属微光徽章（L1~L4）；
+     - 4 档极光渐变滑动槽轨道、4 刻度小点悬浮放大动效、L4 极速向左流动星晶流光粒子、白色高光圆球手柄；
+     - 策略解读卡片中动态渲染安全防护（1~5 刻度）与直通速度（1~5 刻度）双维计分条；
+     - 支持 `disabled` 状态：给轨道、手柄、原生 input、刻度按钮施加统一置灰锁定与 `not-allowed` 交互样式。
+2. **重构守护规则表单与开关联动逻辑 (`src/pages/options/tabs/SitesTab.tsx`)**：
+   - 在 `SiteForm` 中添加 `inheritGlobal` 布尔状态（初始值：`initial?.validationLevel == null || initial.validationLevel === 'default'`）；
+   - 添加 `customLevel` 状态（初始值：若有明确自定义则保留，否则预填当前全局设置等级 `globalLevel`）；
+   - 在表单界面中，设计了独立的顶部切换头：左侧标题与辅助说明，右侧配置「继承全局」Switch 开关；
+   - 开关开启时：显示“继承全局策略”，滑块置灰锁定并展示全局当前的策略级别；
+   - 开关关闭时：显示“单独定制策略”，滑块完全激活，支持用户在 1~4 档间流畅滑动并切换；
+   - 提交保存（`submit`）时：若 `inheritGlobal === true`，保存 `validationLevel: undefined`（完全恢复为全局继承）；若为 `false`，保存用户自定义的 `customLevel`。
+3. **规则列表徽章展示统一升级 (`SitesTab.tsx`)**：
+   - 列表项中的策略 Tag 引入 `getPolicyMeta()`，统一渲染标准标签等级与颜色（如 `L1 时间画像`、`L2 宽松效率`、`L3 抽样检测`、`L4 严格拦截`），继承全局时显示 `跟随全局: L2 宽松效率`，鼠标悬浮显示完整策略名称。
+4. **内嵌样式与禁用态增强 (`src/pages/options/options.css`)**：
+   - 补充 `.policy-slider-card-disabled` 降低亮度、淡灰边框样式；
+   - 补充 `.site-form-card .policy-slider-card` 内嵌内边距与边框圆角，使其完美融合进规则编辑弹窗表单中；
+   - 补充 `.policy-mini-slider.slider-disabled` 置灰滤镜与事件穿透屏蔽。
+
+#### 3. 修改的文件清单
+- **`src/pages/options/components/PolicyLevelSlider.tsx`** [NEW]：封装极光 4 档微型滑块通用组件，支持状态禁用、双维评分条及动效；
+- **`src/pages/options/tabs/SitesTab.tsx`** [MODIFY]：在 `SiteForm` 中实现继承全局 Switch 开关与策略滑块联动，升级规则列表策略徽章；
+- **`src/pages/options/options.css`** [MODIFY]：新增规则表单内嵌滑块卡片样式与置灰锁定态样式；
+- **`Agents_Edit.md`** [MODIFY]：详细记录本次需求背景、组件封装、表单联动与测试情况。
+
+#### 4. 验证与构建测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，**0 错误、0 警告**；
+- **单元测试集 (Vitest)**：执行 `npm test`，全套 6 个测试套件、49 项测试 **100% 全部通过**；
+- **生产环境打包 (Vite)**：执行 `npm run build`，耗时 496ms 顺利完成无损打包输出至 `dist/`。
+
+---
+
+### [2026-09-22] 安全拦截/放行页（Blocked）100 分及安全放行状态底色红转绿修复
+
+#### 1. 需求背景与排查
+用户（彩彩）反馈指正：
+- **现象**：当安全检测通过、评分达到满分 100 分（安全合规·准予通行，或自动返回倒计时阶段）时，页面上方的盾牌圆形徽章底色、大背景光晕仍然呈现为红色（淡粉红色）。
+- **根本成因排查**：
+  1. 在 `src/pages/blocked/blocked.css` 中，`.blocked-shield-badge`（顶部大盾牌徽标）的背景色写死为 `var(--danger-surface)`（淡粉红色），边框与光晕也写死为 `var(--danger-glow)`，缺少安全通过时的专属类样式；
+  2. 外层页面布局容器 `.blocked-layout` 的顶部径向光晕渐变固定为 `var(--danger-glow)`（红色光晕），并未在检测通过/100分时动态切换；
+  3. `100/100` 分数徽标 `.risk-score-badge` 在 100 分时仅文字变绿，背景仍为普通浅色底，未凸显晶莹通关质感。
+
+#### 2. 技术设计与详细实现
+1. **统一安全通过/放行判定逻辑 (`src/pages/blocked/App.tsx`)**：
+   - 提取全局放行/通过判定：`const isPassed = redirecting || risk?.level === 'safe' || risk?.score === 100;`；
+   - 为页面外层容器挂载 `.blocked-layout.blocked-layout-success`；
+   - 为卡片挂载 `.blocked-card-success`；
+   - 为顶部盾牌徽标挂载 `.blocked-shield-badge.blocked-shield-badge-success`。
+2. **重塑安全通过放行样式体系 (`src/pages/blocked/blocked.css`)**：
+   - **大背景顶部光晕**：`.blocked-layout.blocked-layout-success` 背景顶部径向渐变切换为清透柔和的翡翠绿安全光晕（`rgba(16, 185, 129, 0.18)`），平滑过渡；
+   - **顶部盾牌徽标底色**：`.blocked-shield-badge-success` 背景由浅粉红彻底改为清爽健康的安全绿底色（`var(--ok-surface)`），边框转为 `var(--ok-glow)`，并赋予 `rgba(16, 185, 129, 0.28)` 绿色光晕外发光；
+   - **卡片边框与阴影**：`.blocked-card-success` 采用翡翠绿半透明边框与安全绿阴影扩散；
+   - **100/100 评分徽标**：`.risk-safe .risk-score-badge` 赋予淡绿色晶莹背景（`rgba(16, 185, 129, 0.12)`）与绿色边框，彻底告别红底违和感。
+
+#### 3. 修改的文件清单
+- **`src/pages/blocked/blocked.css`** [MODIFY]：新增放行状态绿色背景光晕、绿色盾牌徽标底色及 100 分徽标绿色底色；
+- **`src/pages/blocked/App.tsx`** [MODIFY]：统一引入 `isPassed`，在 100 分与放行倒计时状态下全面激活绿色安全态类名；
+- **`Agents_Edit.md`** [MODIFY]：详细记录本次底色红转绿修复全过程。
+
+#### 4. 验证与构建测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，**0 错误、0 警告**；
+- **单元测试集 (Vitest)**：执行 `npm test`，全套 6 个测试套件、49 项测试 **100% 全部通过**；
+- **生产环境打包 (Vite)**：执行 `npm run build`，顺利完成打包输出。
+
+---
+
+### [2026-09-22] 补充构建脚本 (npm run build) 自动导出 proxy-switch-protect-x.x.x 压缩包
+
+#### 1. 需求背景与目标
+用户（彩彩）反馈要求：
+- 补充 `npm run build` 打包脚本，在完成代码编译后，自动导出命名为 `proxy-switch-protect-x.x.x.zip` 的压缩包（其中 `x.x.x` 为 `package.json` 中的当前版本号）；
+- 压缩包统一输出到 `dist/zip/` 目录下；
+- 压缩包解压后为完整的 Chromium 浏览器扩展根目录（包含 `manifest.json`、`background.js`、`options.html`、`popup.html`、`blocked.html`、`assets/`、`icons/` 等），即开即用。
+
+#### 2. 技术设计与详细实现
+1. **实现零依赖标准 ZIP 格式打包器 (`tools/pack-zip.mjs`)**：
+   - 使用 Node.js 原生标准库（`node:fs`、`node:path`、`node:zlib`），完全不引入冗余第三方依赖包；
+   - 自动解析 `package.json` 中的 `version` 字段，动态生成产物名 `proxy-switch-protect-${version}.zip`；
+   - 遍历 `dist/` 目录下的所有文件：
+     - 严格排除输出目录 `dist/zip` 及其自身，防止递归打包嵌套；
+     - 忽略 `.DS_Store`、`Thumbs.db` 等系统临时文件；
+     - 文件路径统一格式化为标准 POSIX 正斜杠（`/`）；
+     - 使用 `zlib.crc32()` 校验数据并使用 `zlib.deflateRawSync()` 高阶压缩（level 9）；
+     - 正确注入 DOS 日期时间戳；
+     - 遵循 PKZIP 2.0 规范，输出合规的 Local File Header、Central Directory Header 与 End of Central Directory Record。
+   - 打印清晰美观的打包统计信息（包含文件总数、原总体积、压缩包体积、压缩比及输出相对路径）。
+2. **工程构建流联动 (`package.json`)**：
+   - 将 `build` 脚本扩展为：`"npm run typecheck && vite build && node tools/pack-zip.mjs"`；
+   - 新增独立打包指令：`"pack": "node tools/pack-zip.mjs"`，方便开发者无需全量重新编译时单独重新打包 ZIP；
+   - 确保 `emptyOutDir: true` 正常清理与构建输出无缝衔接。
+
+#### 3. 修改的文件清单
+- **`tools/pack-zip.mjs`** [NEW]：零依赖标准 ZIP 打包脚本，支持自动版本提取与 `dist/zip/` 输出；
+- **`package.json`** [MODIFY]：在 `scripts` 中串联打包脚本，增加 `build` 自动导出与 `pack` 独立打包命令；
+- **`Agents_Edit.md`** [MODIFY]：详细记录本次构建增强与 ZIP 打包技术细节。
+
+#### 4. 验证与构建测试记录
+- **静态类型检查 (TypeScript)**：执行 `tsc --noEmit`，**0 错误、0 警告**；
+- **单元测试集 (Vitest)**：执行 `npm test`，49 项测试 **100% 全部通过**；
+- **构建并导出 ZIP**：执行 `npm run build`，成功完成前端 MPA 编译并在 `dist/zip/` 生成 `proxy-switch-protect-3.5.1.zip`（28 个文件，原始 518.6 KB，压缩至 214.6 KB，体积缩减 58.6%）；
+- **ZIP 解压结构验证**：使用 `tar -tf dist/zip/proxy-switch-protect-3.5.1.zip` 验证包内层级，`manifest.json` 与各入口 HTML 均在根目录，无多余冗余路径，解压即可直接导入 Chrome/Edge 浏览器。
+
+
+
 
 
 

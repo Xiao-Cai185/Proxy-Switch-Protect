@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Activity,
+  AlertCircle,
   AlertTriangle,
+  CheckCircle2,
   Clock,
   Download,
   Play,
@@ -70,6 +72,106 @@ function getSpeedScoreColor(score: number): string {
   }
 }
 
+interface ValidatedNumberInputProps {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  placeholder?: string;
+  unit?: string;
+  onSave: (val: number) => void;
+  onSuccess: () => void;
+}
+
+/**
+ * 带有完整校验与失焦保存机制的数字输入组件：
+ * 1. 允许用户彻底删除干净再重新输入；
+ * 2. 失焦 (onBlur) 或按 Enter 时执行范围与格式校验；
+ * 3. 校验异常时标红输入框并展示友好错误提示；
+ * 4. 校验通过且数值变动时触发保存与保存成功提示。
+ */
+function ValidatedNumberInput({
+  value,
+  min,
+  max,
+  step = 1,
+  placeholder,
+  unit,
+  onSave,
+  onSuccess,
+}: ValidatedNumberInputProps) {
+  const [draft, setDraft] = useState<string>(() => (value != null ? String(value) : ''));
+  const [error, setError] = useState<string | null>(null);
+
+  // 当外部 value 变更且当前没有错误时同步草稿（例如重置/备份导入）
+  useEffect(() => {
+    if (value != null && !error) {
+      setDraft(String(value));
+    }
+  }, [value, error]);
+
+  const handleBlur = () => {
+    const trimmed = draft.trim();
+    if (trimmed === '') {
+      setError(`数值不能为空，请输入 ${min} ~ ${max} 之间的有效数字`);
+      return;
+    }
+    const num = Number(trimmed);
+    if (Number.isNaN(num) || !Number.isFinite(num)) {
+      setError('请输入合规的有效数字');
+      return;
+    }
+    if (num < min || num > max) {
+      setError(`数值超出范围，请输入 ${min} ~ ${max} 之间的数字`);
+      return;
+    }
+    setError(null);
+    setDraft(String(num));
+    if (num !== value) {
+      onSave(num);
+      onSuccess();
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+      <div className="row" style={{ gap: '6px', alignItems: 'center', width: '100%' }}>
+        <input
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          className={error ? 'input-error' : ''}
+          placeholder={placeholder}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            if (error) setError(null);
+          }}
+          onBlur={handleBlur}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.currentTarget.blur();
+            } else if (e.key === 'Escape') {
+              setDraft(String(value != null ? value : ''));
+              setError(null);
+              e.currentTarget.blur();
+            }
+          }}
+          style={{ flex: 1 }}
+        />
+        {unit && <span className="muted small" style={{ flex: 'none' }}>{unit}</span>}
+      </div>
+      {error && (
+        <div className="field-error" style={{ marginTop: '5px', fontSize: '11px', color: 'var(--danger)' }}>
+          <AlertCircle size={12} style={{ flex: 'none' }} />
+          <span>{error}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SettingsTab() {
   const settings = useSettings();
   const [testResults, setTestResults] = useState<Record<string, string>>({});
@@ -81,11 +183,35 @@ export function SettingsTab() {
   const [isDragging, setIsDragging] = useState(false);
   const [hoveredTick, setHoveredTick] = useState<number | null>(null);
 
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const triggerToast = (msg = '配置保存成功') => {
+    setToastMsg(msg);
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMsg(null);
+    }, 3000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   if (!settings) return null;
 
   const isCustom = isCustomRecheck || !RECHECK_PRESETS.includes(settings.recheckMinutes ?? 30);
 
-  const patch = (p: Partial<Settings>) => void saveSettings({ ...settings, ...p });
+  const patch = (p: Partial<Settings>, notify = true) => {
+    void saveSettings({ ...settings, ...p });
+    if (notify) {
+      triggerToast('配置保存成功');
+    }
+  };
 
   const patchChecker = (id: string, p: Partial<CheckerConfig>) => {
     patch({
@@ -175,6 +301,14 @@ export function SettingsTab() {
 
   return (
     <div className="tab-container">
+      {/* 顶部 3 秒配置保存成功浮动消息框 */}
+      {toastMsg && (
+        <div className="settings-toast-banner" role="status" aria-live="polite">
+          <CheckCircle2 size={16} style={{ flex: 'none' }} />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
       {/* WebRTC 隐私保护 */}
       <div className="tab-header-row">
         <h2 className="tab-title">
@@ -510,21 +644,16 @@ export function SettingsTab() {
                     </select>
                     {isCustom && (
                       <div className="row" style={{ flex: '1 1 48%', gap: '6px', alignItems: 'center' }}>
-                        <input
-                          type="number"
+                        <ValidatedNumberInput
+                          value={settings.recheckMinutes ?? 20}
                           min={1}
                           max={1440}
                           step={1}
-                          style={{ flex: 1 }}
                           placeholder="输入分钟数 (1~1440)"
-                          value={settings.recheckMinutes ?? 20}
-                          onChange={(e) =>
-                            patch({
-                              recheckMinutes: Math.max(1, Math.min(1440, Number(inputValue(e)) || 1)),
-                            })
-                          }
+                          unit="分钟"
+                          onSave={(v) => patch({ recheckMinutes: v }, false)}
+                          onSuccess={() => triggerToast('配置保存成功')}
                         />
-                        <span className="muted small" style={{ flex: 'none' }}>分钟</span>
                       </div>
                     )}
                   </div>
@@ -538,29 +667,27 @@ export function SettingsTab() {
                   <>
                     <label className="field">
                       <span className="field-label">严格模式页内资源宽容放行数（条，默认 5 条）</span>
-                      <input
-                        type="number"
+                      <ValidatedNumberInput
+                        value={settings.strictToleranceCount ?? 5}
                         min={1}
                         max={50}
                         step={1}
-                        value={settings.strictToleranceCount ?? 5}
-                        onChange={(e) =>
-                          patch({ strictToleranceCount: Math.max(1, Math.min(50, Number(inputValue(e)) || 5)) })
-                        }
+                        unit="条"
+                        onSave={(v) => patch({ strictToleranceCount: v }, false)}
+                        onSuccess={() => triggerToast('配置保存成功')}
                       />
                       <span className="field-hint">严格模式单标签页验证通过该数量页内资源后放行后续请求，避免页面不可用</span>
                     </label>
                     <label className="field full">
                       <span className="field-label">严格模式页内放行周期复检间隔（分钟，默认 5 分钟）</span>
-                      <input
-                        type="number"
+                      <ValidatedNumberInput
+                        value={settings.strictRecheckMinutes ?? 5}
                         min={1}
                         max={60}
                         step={1}
-                        value={settings.strictRecheckMinutes ?? 5}
-                        onChange={(e) =>
-                          patch({ strictRecheckMinutes: Math.max(1, Math.min(60, Number(inputValue(e)) || 5)) })
-                        }
+                        unit="分钟"
+                        onSave={(v) => patch({ strictRecheckMinutes: v }, false)}
+                        onSuccess={() => triggerToast('配置保存成功')}
                       />
                       <span className="field-hint">严格模式页内资源宽容放行后，每隔此分钟在后台静默复检出口 IP，若异常则配合拦截</span>
                     </label>
@@ -571,15 +698,14 @@ export function SettingsTab() {
                 {curLevel.id === 'time_window' && (
                   <label className="field">
                     <span className="field-label">时间画像免检窗口时长（分钟，默认 60 分钟）</span>
-                    <input
-                      type="number"
+                    <ValidatedNumberInput
+                      value={settings.timeWindowMinutes ?? 60}
                       min={5}
                       max={1440}
                       step={5}
-                      value={settings.timeWindowMinutes ?? 60}
-                      onChange={(e) =>
-                        patch({ timeWindowMinutes: Math.max(5, Math.min(1440, Number(inputValue(e)) || 60)) })
-                      }
+                      unit="分钟"
+                      onSave={(v) => patch({ timeWindowMinutes: v }, false)}
+                      onSuccess={() => triggerToast('配置保存成功')}
                     />
                     <span className="field-hint">第四等级时间画像生效时，在此窗口期内访问同一站点免除二次首屏验证</span>
                   </label>
@@ -690,31 +816,27 @@ export function SettingsTab() {
         <div className="form-grid">
           <label className="field">
             <span className="field-label">单源检测超时时间（毫秒）</span>
-            <input
-              type="number"
+            <ValidatedNumberInput
+              value={settings.timeoutMs}
               min={1000}
               max={30000}
               step={500}
-              value={settings.timeoutMs}
-              onChange={(e) =>
-                patch({ timeoutMs: Math.max(1000, Number(inputValue(e)) || 5000) })
-              }
+              unit="毫秒"
+              onSave={(v) => patch({ timeoutMs: v }, false)}
+              onSuccess={() => triggerToast('配置保存成功')}
             />
             <span className="field-hint">超时后将自动无缝降级尝试下一个备用检测源</span>
           </label>
           <label className="field">
             <span className="field-label">安全检测通过后自动返回原网站延迟（秒，默认 3 秒）</span>
-            <input
-              type="number"
+            <ValidatedNumberInput
+              value={settings.passRedirectDelaySec ?? 3}
               min={1}
               max={30}
               step={1}
-              value={settings.passRedirectDelaySec ?? 3}
-              onChange={(e) =>
-                patch({
-                  passRedirectDelaySec: Math.max(1, Math.min(30, Number(inputValue(e)) || 3)),
-                })
-              }
+              unit="秒"
+              onSave={(v) => patch({ passRedirectDelaySec: v }, false)}
+              onSuccess={() => triggerToast('配置保存成功')}
             />
             <span className="field-hint">
               安全核验通过后，落地页展示放行结果并等待自动返回目标网站的倒计时时长（默认 3 秒）。给程序与网络连接留出充足的确认时间。
@@ -747,39 +869,38 @@ export function SettingsTab() {
         <div className="form-grid">
           <label className="field">
             <span className="field-label">统计时间滑动窗口（天）</span>
-            <input
-              type="number"
+            <ValidatedNumberInput
+              value={settings.suggestWindowDays ?? 5}
               min={3}
               max={90}
-              value={settings.suggestWindowDays}
-              onChange={(e) =>
-                patch({ suggestWindowDays: Math.max(3, Number(inputValue(e)) || 5) })
-              }
+              step={1}
+              unit="天"
+              onSave={(v) => patch({ suggestWindowDays: v }, false)}
+              onSuccess={() => triggerToast('配置保存成功')}
             />
           </label>
           <label className="field">
             <span className="field-label">最少访问天数阈值</span>
-            <input
-              type="number"
+            <ValidatedNumberInput
+              value={settings.suggestMinDays ?? 3}
               min={2}
               max={60}
-              value={settings.suggestMinDays}
-              onChange={(e) =>
-                patch({ suggestMinDays: Math.max(2, Number(inputValue(e)) || 3) })
-              }
+              step={1}
+              unit="天"
+              onSave={(v) => patch({ suggestMinDays: v }, false)}
+              onSuccess={() => triggerToast('配置保存成功')}
             />
           </label>
           <label className="field full">
             <span className="field-label">主导国家占比阈值（%）</span>
-            <input
-              type="number"
+            <ValidatedNumberInput
+              value={Math.round((settings.suggestRatio ?? 0.9) * 100)}
               min={50}
               max={100}
-              value={Math.round(settings.suggestRatio * 100)}
-              onChange={(e) => {
-                const n = Math.min(100, Math.max(50, Number(inputValue(e)) || 90));
-                patch({ suggestRatio: n / 100 });
-              }}
+              step={1}
+              unit="%"
+              onSave={(v) => patch({ suggestRatio: v / 100 }, false)}
+              onSuccess={() => triggerToast('配置保存成功')}
             />
             <span className="field-hint">
               当某国家地区访问频次占该域名总访问天数的比例高于此值时，触发绑定建议。

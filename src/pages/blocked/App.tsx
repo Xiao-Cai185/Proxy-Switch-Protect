@@ -21,6 +21,7 @@ import { countryName } from '../../shared/countries';
 import { primaryMatchIp } from '../../shared/dual-stack';
 import { ipInCidr } from '../../shared/matchers';
 import { sendCmd, type VerifyTabResult } from '../../shared/messages';
+import { loadSettings } from '../../shared/storage';
 import { Flag, ProfileBadge } from '../ui/components';
 import {
   useActiveProfileId,
@@ -72,7 +73,6 @@ export function App() {
   const [redirecting, setRedirecting] = useState(false);
   const [validating, setValidating] = useState(true);
 
-  const targetDelaySec = Math.max(1, settings?.passRedirectDelaySec ?? 3);
   const [countdown, setCountdown] = useState<number>(3);
 
   const site = (sites ?? []).find((s) => s.id === siteId);
@@ -100,7 +100,11 @@ export function App() {
           });
           if (!isMounted) return;
           if (res.pass) {
-            location.replace(from);
+            setValidating(false);
+            const curSettings = await loadSettings();
+            const delay = Math.max(1, curSettings.passRedirectDelaySec ?? 3);
+            setCountdown(delay);
+            setRedirecting(true);
             return;
           }
         }
@@ -114,15 +118,17 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, [siteId, from, targetDelaySec]);
+  }, [siteId, from]);
 
   // 守护恢复（首屏核验完成之后，因用户自愈/手动重检/临时放行状态恢复）后自动加入白名单并跳回原页面
   useEffect(() => {
     if (!from || redirecting || validating) return;
     if (state?.status === 'allowed' || state?.status === 'bypass') {
-      setCountdown(targetDelaySec);
-      setRedirecting(true);
       void (async () => {
+        const curSettings = await loadSettings();
+        const delay = Math.max(1, curSettings.passRedirectDelaySec ?? 3);
+        setCountdown(delay);
+        setRedirecting(true);
         try {
           const tab = await chrome.tabs.getCurrent();
           if (tab?.id) {
@@ -133,7 +139,7 @@ export function App() {
         }
       })();
     }
-  }, [state?.status, from, redirecting, validating, siteId, targetDelaySec]);
+  }, [state?.status, from, redirecting, validating, siteId]);
 
   // 倒计时管理器：当 redirecting 为 true 时每秒递减，归零时执行替换跳转
   useEffect(() => {
@@ -354,12 +360,14 @@ export function App() {
     };
   }, [site, result, checkState?.status, webrtcOn, redirecting, state?.status]);
 
+  const isPassed = redirecting || risk?.level === 'safe' || risk?.score === 100;
+
   return (
-    <div className="blocked-layout">
-      <div className={`blocked-card card ${redirecting ? 'blocked-card-success' : ''}`}>
+    <div className={`blocked-layout ${isPassed ? 'blocked-layout-success' : ''}`}>
+      <div className={`blocked-card card ${isPassed ? 'blocked-card-success' : ''}`}>
         {/* 顶部安全盾牌徽标 */}
-        <div className="blocked-shield-badge">
-          {redirecting ? (
+        <div className={`blocked-shield-badge ${isPassed ? 'blocked-shield-badge-success' : ''}`}>
+          {isPassed ? (
             <ShieldCheck size={36} className="blocked-shield-icon-success" />
           ) : (
             <ShieldAlert size={36} className="blocked-shield-icon" />

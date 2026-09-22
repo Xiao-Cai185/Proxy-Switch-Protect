@@ -12,6 +12,14 @@
     radial-gradient(100% 70% at 50% 20%, var(--danger-glow) 0%, transparent 60%),
     radial-gradient(80% 50% at 50% 80%, var(--primary-glow) 0%, transparent 70%),
     var(--bg-app);
+  transition: background 0.4s ease;
+}
+
+.blocked-layout.blocked-layout-success {
+  background:
+    radial-gradient(100% 70% at 50% 20%, rgba(16, 185, 129, 0.18) 0%, transparent 60%),
+    radial-gradient(80% 50% at 50% 80%, var(--primary-glow) 0%, transparent 70%),
+    var(--bg-app);
 }
 
 .blocked-card {
@@ -28,8 +36,8 @@
 }
 
 .blocked-card-success {
-  border-color: var(--ok-glow);
-  box-shadow: 0 12px 36px -4px rgba(16, 185, 129, 0.15), var(--shadow-md);
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: 0 12px 36px -4px rgba(16, 185, 129, 0.18), var(--shadow-md);
 }
 
 /* 顶部盾牌徽标 */
@@ -44,6 +52,13 @@
   justify-content: center;
   margin-bottom: 16px;
   box-shadow: 0 4px 16px var(--danger-glow);
+  transition: all 0.3s ease;
+}
+
+.blocked-shield-badge-success {
+  background: var(--ok-surface);
+  border-color: var(--ok-glow);
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.28);
 }
 
 .blocked-shield-icon {
@@ -126,6 +141,13 @@
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   flex: none;
+  transition: all 0.2s ease;
+}
+
+.risk-safe .risk-score-badge {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
 }
 
 .risk-score-num {

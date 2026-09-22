@@ -9,11 +9,13 @@ import {
 } from 'lucide-react';
 import { normalizeDomain, parseCidr } from '../../../shared/matchers';
 import { loadSites, saveSites } from '../../../shared/storage';
+import { getPolicyMeta } from '../../../shared/constants';
 import type { ProtectedSite, TrafficValidationLevel } from '../../../shared/types';
 import { Empty, Flag, StatusDot, Switch } from '../../ui/components';
 import { useGuardStates, useSettings, useSites } from '../../ui/hooks';
 import { inputValue } from '../../ui/util';
 import { CountrySelect } from '../components/CountrySelect';
+import { PolicyLevelSlider } from '../components/PolicyLevelSlider';
 
 export function SitesTab() {
   const sites = useSites() ?? [];
@@ -114,37 +116,31 @@ export function SitesTab() {
                     </span>
                   )}
                   {site.validationLevel && site.validationLevel !== 'default' ? (
-                    <span
-                      className={`tag ${
-                        site.validationLevel === 'strict'
-                          ? 'tag-warning'
-                          : site.validationLevel === 'sampling'
-                          ? 'tag-primary'
-                          : site.validationLevel === 'time_window'
-                          ? 'tag-primary'
-                          : 'tag-ok'
-                      }`}
-                      style={{ fontSize: '10px' }}
-                    >
-                      {site.validationLevel === 'strict'
-                        ? '严格拦截'
-                        : site.validationLevel === 'sampling'
-                        ? '抽样检测'
-                        : site.validationLevel === 'time_window'
-                        ? '时间画像'
-                        : '宽松效率'}
-                    </span>
+                    (() => {
+                      const meta = getPolicyMeta(site.validationLevel);
+                      return (
+                        <span
+                          className={`tag ${meta.badgeClass}`}
+                          style={{ fontSize: '10px' }}
+                          title={`独立定制策略：第 ${meta.level} 等级 · ${meta.name}`}
+                        >
+                          L{meta.level} {meta.shortName}
+                        </span>
+                      );
+                    })()
                   ) : (
-                    <span className="tag tag-muted" style={{ fontSize: '10px' }}>
-                      跟随全局:{' '}
-                      {settings?.trafficValidationLevel === 'strict'
-                        ? '严格'
-                        : settings?.trafficValidationLevel === 'sampling'
-                        ? '抽样'
-                        : settings?.trafficValidationLevel === 'time_window'
-                        ? '时间画像'
-                        : '宽松'}
-                    </span>
+                    (() => {
+                      const meta = getPolicyMeta(settings?.trafficValidationLevel);
+                      return (
+                        <span
+                          className="tag tag-muted"
+                          style={{ fontSize: '10px' }}
+                          title={`继承全局策略：第 ${meta.level} 等级 · ${meta.name}`}
+                        >
+                          跟随全局: L{meta.level} {meta.shortName}
+                        </span>
+                      );
+                    })()
                   )}
                 </div>
                 {site.enabled && guardState?.reason && (
@@ -204,8 +200,15 @@ function SiteForm({
   const [countries, setCountries] = useState<string[]>(initial?.expectedCountries ?? []);
   const [ranges, setRanges] = useState((initial?.expectedIpRanges ?? []).join('\n'));
   const [matchMode, setMatchMode] = useState<'any' | 'all'>(initial?.matchMode ?? 'any');
-  const [validationLevel, setValidationLevel] = useState<TrafficValidationLevel | 'default'>(
-    initial?.validationLevel ?? 'default',
+  const settings = useSettings();
+  const globalLevel: TrafficValidationLevel = settings?.trafficValidationLevel || 'relaxed';
+  const [inheritGlobal, setInheritGlobal] = useState<boolean>(
+    initial?.validationLevel == null || initial.validationLevel === 'default',
+  );
+  const [customLevel, setCustomLevel] = useState<TrafficValidationLevel>(
+    initial?.validationLevel && initial.validationLevel !== 'default'
+      ? initial.validationLevel
+      : globalLevel,
   );
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [email, setEmail] = useState(initial?.note?.email ?? '');
@@ -236,7 +239,7 @@ function SiteForm({
       expectedCountries: countries,
       expectedIpRanges: rangeList,
       matchMode,
-      validationLevel: validationLevel === 'default' ? undefined : validationLevel,
+      validationLevel: inheritGlobal ? undefined : customLevel,
       enabled,
       note: hasNote
         ? {
@@ -322,38 +325,59 @@ function SiteForm({
           </div>
         </div>
 
-        <div className="field full">
-          <span className="field-label">流量判定校验策略等级</span>
-          <div className="row" style={{ gap: '14px', flexWrap: 'wrap', marginTop: '6px' }}>
-            {[
-              { id: 'default' as const, label: '跟随全局设置' },
-              { id: 'time_window' as const, label: '第一等级：基于时间画像策略' },
-              { id: 'relaxed' as const, label: '第二等级：宽松效率模式' },
-              { id: 'sampling' as const, label: '第三等级：抽样检测模式' },
-              { id: 'strict' as const, label: '第四等级：严格拦截模式' },
-            ].map((lvl) => (
-              <label key={lvl.id} className="row small" style={{ cursor: 'pointer', gap: '5px' }}>
-                <input
-                  type="radio"
-                  name="siteValidationLevel"
-                  checked={validationLevel === lvl.id}
-                  onChange={() => setValidationLevel(lvl.id)}
-                />
-                <span>{lvl.label}</span>
-              </label>
-            ))}
+        <div className="field full" style={{ marginTop: '2px' }}>
+          <div
+            className="row-between"
+            style={{
+              marginBottom: '10px',
+              paddingBottom: '8px',
+              borderBottom: '1px solid var(--border-subtle)',
+              alignItems: 'center',
+            }}
+          >
+            <div>
+              <span className="field-label" style={{ marginBottom: 0 }}>
+                流量判定校验策略等级
+              </span>
+              <div className="muted small" style={{ fontSize: '11px', marginTop: '2px' }}>
+                {inheritGlobal
+                  ? '当前已开启继承全局策略，自动跟随全局设置，滑块已锁定'
+                  : '已关闭继承全局，可针对当前受守护域名自由滑动定制策略'}
+              </div>
+            </div>
+            <div className="row" style={{ gap: '10px', alignItems: 'center' }}>
+              <span
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: inheritGlobal ? 'var(--primary)' : 'var(--text-secondary)',
+                }}
+              >
+                {inheritGlobal ? '继承全局策略' : '单独定制策略'}
+              </span>
+              <Switch
+                checked={inheritGlobal}
+                onChange={(checked) => {
+                  setInheritGlobal(checked);
+                  if (checked) {
+                    setCustomLevel(globalLevel);
+                  }
+                }}
+                label={inheritGlobal ? '继承中' : '独立定制'}
+              />
+            </div>
           </div>
-          <span className="field-hint">
-            {validationLevel === 'default'
-              ? '默认继承系统设置中的全局策略。'
-              : validationLevel === 'relaxed'
-              ? '开屏首检，校验通过后默认信任放行页面内所有后续交互流量，极速直通。'
-              : validationLevel === 'time_window'
-              ? '时间画像策略：固定时间窗口内免除二次首屏验证，由静默周期复检与手动检测兜底。'
-              : validationLevel === 'sampling'
-              ? '开屏必检，后续页面内请求按频次轻量抽样复检，平滑无感。'
-              : '最高安全等级，开屏与切页实时强校验，验证通过 5 条页内资源后宽容放行并周期复检。'}
-          </span>
+
+          <PolicyLevelSlider
+            value={inheritGlobal ? globalLevel : customLevel}
+            onChange={(lvl) => {
+              if (!inheritGlobal) {
+                setCustomLevel(lvl);
+              }
+            }}
+            disabled={inheritGlobal}
+            disabledHint={`当前规则已开启继承全局策略（第 ${getPolicyMeta(globalLevel).level} 等级 · ${getPolicyMeta(globalLevel).name}）。关掉右侧开关后即可启用滑块单独定制。`}
+          />
         </div>
 
         <div className="field full" style={{ borderTop: '1px dashed var(--border-card)', paddingTop: '10px' }}>

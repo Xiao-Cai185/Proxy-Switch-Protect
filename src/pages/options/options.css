@@ -433,6 +433,29 @@
   overflow: hidden;
 }
 
+.policy-slider-card.policy-slider-card-disabled {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.08);
+  opacity: 0.88;
+}
+
+.site-form-card .policy-slider-card {
+  padding: 14px 16px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-md);
+}
+
+.site-form-card .policy-slider-card .policy-slider-header {
+  margin-bottom: 10px;
+}
+
+.policy-mini-slider.slider-disabled {
+  opacity: 0.65;
+  filter: grayscale(0.4);
+  pointer-events: none;
+}
+
 .policy-slider-header {
   margin-bottom: 14px;
 }
@@ -826,4 +849,38 @@
   align-items: center;
   gap: 6px;
 }
+
+/* 全局设置顶部 3 秒配置保存成功浮动消息框 */
+.settings-toast-banner {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1.5px solid var(--ok);
+  color: var(--ok);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 15px rgba(16, 185, 129, 0.3);
+  animation: settingsToastPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+@keyframes settingsToastPop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -14px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
 
